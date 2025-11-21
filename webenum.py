@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 WebEnum - Comprehensive Web Enumeration Tool
-Automatiza enumeração completa de alvos web usando múltiplas ferramentas
+Automates complete web target enumeration using multiple tools
 """
 
 import os
@@ -17,7 +17,7 @@ from typing import List, Dict, Optional, Set
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import shutil
 
-# Cores para output
+# Colors for output
 class Colors:
     HEADER = '\033[95m'
     OKBLUE = '\033[94m'
@@ -31,7 +31,7 @@ class Colors:
 
 
 class Logger:
-    """Sistema de logging customizado com cores"""
+    """Custom logging system with colors"""
 
     @staticmethod
     def info(msg: str):
@@ -57,7 +57,7 @@ class Logger:
 
 
 class ToolChecker:
-    """Verifica se as ferramentas necessárias estão instaladas"""
+    """Checks if required tools are installed"""
 
     REQUIRED_TOOLS = {
         'subdomain': ['subfinder', 'assetfinder', 'findomain'],
@@ -70,12 +70,12 @@ class ToolChecker:
 
     @staticmethod
     def check_tool(tool: str) -> bool:
-        """Verifica se uma ferramenta está instalada"""
+        """Check if a tool is installed"""
         return shutil.which(tool) is not None
 
     @classmethod
     def check_all(cls, check_optional: bool = False) -> Dict[str, List[str]]:
-        """Verifica todas as ferramentas e retorna o status"""
+        """Check all tools and return status"""
         missing = []
         available = []
 
@@ -93,14 +93,14 @@ class ToolChecker:
 
 
 class OutputManager:
-    """Gerencia diretórios e arquivos de output"""
+    """Manages output directories and files"""
 
     def __init__(self, base_dir: str, domain: str):
         self.domain = domain
         self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.base_dir = Path(base_dir) / f"{domain}_{self.timestamp}"
 
-        # Estrutura de diretórios
+        # Directory structure
         self.dirs = {
             'root': self.base_dir,
             'subdomains': self.base_dir / 'subdomains',
@@ -116,17 +116,17 @@ class OutputManager:
         self._create_structure()
 
     def _create_structure(self):
-        """Cria a estrutura de diretórios"""
+        """Create directory structure"""
         for dir_path in self.dirs.values():
             dir_path.mkdir(parents=True, exist_ok=True)
-        Logger.success(f"Estrutura criada em: {self.base_dir}")
+        Logger.success(f"Structure created at: {self.base_dir}")
 
     def get_path(self, category: str, filename: str) -> Path:
-        """Retorna o caminho completo para um arquivo"""
+        """Return full path for a file"""
         return self.dirs[category] / filename
 
     def dedupe_file(self, input_file: Path, output_file: Path):
-        """Remove duplicatas de um arquivo"""
+        """Remove duplicates from a file"""
         if not input_file.exists():
             return
 
@@ -138,13 +138,13 @@ class OutputManager:
             with open(output_file, 'w') as f:
                 f.write('\n'.join(sorted(lines)) + '\n')
 
-            Logger.success(f"Dedupe: {len(lines)} linhas únicas salvas em {output_file.name}")
+            Logger.success(f"Dedupe: {len(lines)} unique lines saved to {output_file.name}")
         except Exception as e:
-            Logger.error(f"Erro no dedupe: {e}")
+            Logger.error(f"Error in dedupe: {e}")
 
 
 class SubdomainEnum:
-    """Enumeração de subdomínios"""
+    """Subdomain enumeration"""
 
     def __init__(self, domain: str, output_mgr: OutputManager):
         self.domain = domain
@@ -156,12 +156,12 @@ class SubdomainEnum:
         }
 
     def run_tool(self, tool_name: str, command: List[str]) -> Set[str]:
-        """Executa uma ferramenta e retorna resultados"""
+        """Run a tool and return results"""
         if not ToolChecker.check_tool(tool_name):
-            Logger.warning(f"{tool_name} não encontrado, pulando...")
+            Logger.warning(f"{tool_name} not found, skipping...")
             return set()
 
-        Logger.info(f"Executando {tool_name}...")
+        Logger.info(f"Running {tool_name}...")
         output_file = self.output_mgr.get_path('subdomains', f'{tool_name}.txt')
 
         try:
@@ -177,23 +177,23 @@ class SubdomainEnum:
             with open(output_file, 'w') as f:
                 f.write('\n'.join(sorted(subs)) + '\n')
 
-            Logger.success(f"{tool_name}: {len(subs)} subdomínios encontrados")
+            Logger.success(f"{tool_name}: {len(subs)} subdomains found")
             return subs
 
         except subprocess.TimeoutExpired:
             Logger.warning(f"{tool_name} timeout")
         except Exception as e:
-            Logger.error(f"Erro ao executar {tool_name}: {e}")
+            Logger.error(f"Error running {tool_name}: {e}")
 
         return set()
 
     def run_all(self) -> Path:
-        """Executa todas as ferramentas de enumeração"""
-        Logger.header("ENUMERAÇÃO DE SUBDOMÍNIOS")
+        """Run all enumeration tools"""
+        Logger.header("SUBDOMAIN ENUMERATION")
 
         all_subs = set()
 
-        # Executa ferramentas em paralelo
+        # Run tools in parallel
         with ThreadPoolExecutor(max_workers=3) as executor:
             futures = {
                 executor.submit(self.run_tool, name, cmd): name
@@ -204,32 +204,32 @@ class SubdomainEnum:
                 subs = future.result()
                 all_subs.update(subs)
 
-        # Adiciona domínio principal
+        # Add main domain
         all_subs.add(self.domain)
 
-        # Salva resultado consolidado
+        # Save consolidated result
         output_file = self.output_mgr.get_path('subdomains', 'all_subdomains.txt')
         with open(output_file, 'w') as f:
             f.write('\n'.join(sorted(all_subs)) + '\n')
 
-        Logger.success(f"Total: {len(all_subs)} subdomínios únicos")
+        Logger.success(f"Total: {len(all_subs)} unique subdomains")
         return output_file
 
 
 class DNSResolver:
-    """Resolução e validação DNS"""
+    """DNS resolution and validation"""
 
     def __init__(self, output_mgr: OutputManager):
         self.output_mgr = output_mgr
 
     def resolve_with_puredns(self, input_file: Path) -> Optional[Path]:
-        """Resolve subdomínios usando puredns"""
+        """Resolve subdomains using puredns"""
         if not ToolChecker.check_tool('puredns'):
-            Logger.warning("puredns não encontrado, pulando resolução...")
+            Logger.warning("puredns not found, skipping resolution...")
             return input_file
 
-        Logger.header("RESOLUÇÃO DNS")
-        Logger.info("Resolvendo subdomínios com puredns...")
+        Logger.header("DNS RESOLUTION")
+        Logger.info("Resolving subdomains with puredns...")
 
         output_file = self.output_mgr.get_path('dns', 'resolved.txt')
 
@@ -240,27 +240,27 @@ class DNSResolver:
                 check=True
             )
 
-            # Conta linhas
+            # Count lines
             with open(output_file, 'r') as f:
                 count = sum(1 for _ in f)
 
-            Logger.success(f"Resolvidos: {count} subdomínios")
+            Logger.success(f"Resolved: {count} subdomains")
             return output_file
 
         except subprocess.TimeoutExpired:
-            Logger.warning("puredns timeout, usando lista original")
+            Logger.warning("puredns timeout, using original list")
             return input_file
         except Exception as e:
-            Logger.error(f"Erro no puredns: {e}")
+            Logger.error(f"Error in puredns: {e}")
             return input_file
 
     def enrich_with_dnsx(self, input_file: Path) -> Optional[Path]:
-        """Enriquece dados DNS com dnsx"""
+        """Enrich DNS data with dnsx"""
         if not ToolChecker.check_tool('dnsx'):
-            Logger.warning("dnsx não encontrado, pulando...")
+            Logger.warning("dnsx not found, skipping...")
             return input_file
 
-        Logger.info("Enriquecendo dados DNS com dnsx...")
+        Logger.info("Enriching DNS data with dnsx...")
 
         output_file = self.output_mgr.get_path('dns', 'dnsx_full.json')
 
@@ -275,34 +275,34 @@ class DNSResolver:
                 check=True
             )
 
-            Logger.success(f"Dados DNS salvos em {output_file.name}")
+            Logger.success(f"DNS data saved to {output_file.name}")
             return input_file
 
         except Exception as e:
-            Logger.error(f"Erro no dnsx: {e}")
+            Logger.error(f"Error in dnsx: {e}")
             return input_file
 
 
 class HTTPProber:
-    """HTTP probing e fingerprinting"""
+    """HTTP probing and fingerprinting"""
 
     def __init__(self, output_mgr: OutputManager):
         self.output_mgr = output_mgr
 
     def probe_with_httpx(self, input_file: Path) -> Optional[Path]:
-        """Faz HTTP probing com httpx"""
+        """Perform HTTP probing with httpx"""
         if not ToolChecker.check_tool('httpx'):
-            Logger.error("httpx é obrigatório! Instale: go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest")
+            Logger.error("httpx is required! Install: go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest")
             return None
 
         Logger.header("HTTP PROBING")
-        Logger.info("Verificando hosts ativos com httpx...")
+        Logger.info("Checking active hosts with httpx...")
 
         json_output = self.output_mgr.get_path('http', 'httpx_full.json')
         alive_output = self.output_mgr.get_path('http', 'alive.txt')
 
         try:
-            # Executa httpx
+            # Run httpx
             subprocess.run(
                 [
                     'httpx', '-l', str(input_file),
@@ -315,7 +315,7 @@ class HTTPProber:
                 check=True
             )
 
-            # Extrai apenas URLs vivas
+            # Extract only alive URLs
             alive_urls = []
             try:
                 with open(json_output, 'r') as f:
@@ -327,28 +327,28 @@ class HTTPProber:
                         except json.JSONDecodeError:
                             continue
             except Exception as e:
-                Logger.warning(f"Erro ao processar JSON: {e}")
+                Logger.warning(f"Error processing JSON: {e}")
 
             with open(alive_output, 'w') as f:
                 f.write('\n'.join(alive_urls) + '\n')
 
-            Logger.success(f"Hosts ativos: {len(alive_urls)}")
+            Logger.success(f"Active hosts: {len(alive_urls)}")
             return alive_output
 
         except subprocess.TimeoutExpired:
             Logger.warning("httpx timeout")
         except Exception as e:
-            Logger.error(f"Erro no httpx: {e}")
+            Logger.error(f"Error in httpx: {e}")
 
         return None
 
     def screenshot_with_gowitness(self, input_file: Path):
-        """Tira screenshots com gowitness"""
+        """Take screenshots with gowitness"""
         if not ToolChecker.check_tool('gowitness'):
-            Logger.warning("gowitness não encontrado, pulando screenshots...")
+            Logger.warning("gowitness not found, skipping screenshots...")
             return
 
-        Logger.info("Tirando screenshots com gowitness...")
+        Logger.info("Taking screenshots with gowitness...")
 
         screenshot_dir = self.output_mgr.dirs['screenshots']
 
@@ -357,26 +357,26 @@ class HTTPProber:
                 ['gowitness', 'file', '-f', str(input_file), '-P', str(screenshot_dir)],
                 timeout=600
             )
-            Logger.success(f"Screenshots salvos em {screenshot_dir}")
+            Logger.success(f"Screenshots saved to {screenshot_dir}")
         except Exception as e:
-            Logger.warning(f"Erro no gowitness: {e}")
+            Logger.warning(f"Error in gowitness: {e}")
 
 
 class URLCollector:
-    """Coleta de URLs de múltiplas fontes"""
+    """URL collection from multiple sources"""
 
     def __init__(self, output_mgr: OutputManager):
         self.output_mgr = output_mgr
 
     def collect_from_archives(self, hosts_file: Path) -> Set[str]:
-        """Coleta URLs de arquivos históricos"""
-        Logger.header("COLETA DE URLs")
+        """Collect URLs from historical archives"""
+        Logger.header("URL COLLECTION")
 
         all_urls = set()
 
         # GAU
         if ToolChecker.check_tool('gau'):
-            Logger.info("Coletando URLs com gau...")
+            Logger.info("Collecting URLs with gau...")
             try:
                 result = subprocess.run(
                     ['gau', '--subs', '--threads', '5'],
@@ -389,11 +389,11 @@ class URLCollector:
                 all_urls.update(urls)
                 Logger.success(f"gau: {len(urls)} URLs")
             except Exception as e:
-                Logger.warning(f"Erro no gau: {e}")
+                Logger.warning(f"Error in gau: {e}")
 
         # Waybackurls
         if ToolChecker.check_tool('waybackurls'):
-            Logger.info("Coletando URLs com waybackurls...")
+            Logger.info("Collecting URLs with waybackurls...")
             try:
                 result = subprocess.run(
                     ['waybackurls'],
@@ -406,9 +406,9 @@ class URLCollector:
                 all_urls.update(urls)
                 Logger.success(f"waybackurls: {len(urls)} URLs")
             except Exception as e:
-                Logger.warning(f"Erro no waybackurls: {e}")
+                Logger.warning(f"Error in waybackurls: {e}")
 
-        # Salva raw
+        # Save raw
         raw_file = self.output_mgr.get_path('urls', 'urls_raw.txt')
         with open(raw_file, 'w') as f:
             f.write('\n'.join(all_urls) + '\n')
@@ -416,12 +416,12 @@ class URLCollector:
         return all_urls
 
     def crawl_live(self, hosts_file: Path) -> Set[str]:
-        """Crawl sites ativos"""
+        """Crawl active sites"""
         all_urls = set()
 
         # Hakrawler
         if ToolChecker.check_tool('hakrawler'):
-            Logger.info("Crawling com hakrawler...")
+            Logger.info("Crawling with hakrawler...")
             try:
                 result = subprocess.run(
                     ['hakrawler', '-plain', '-depth', '2'],
@@ -434,17 +434,17 @@ class URLCollector:
                 all_urls.update(urls)
                 Logger.success(f"hakrawler: {len(urls)} URLs")
             except Exception as e:
-                Logger.warning(f"Erro no hakrawler: {e}")
+                Logger.warning(f"Error in hakrawler: {e}")
 
         return all_urls
 
     def collect_js_files(self, hosts_file: Path) -> Path:
-        """Coleta arquivos JavaScript"""
+        """Collect JavaScript files"""
         if not ToolChecker.check_tool('getJS'):
-            Logger.warning("getJS não encontrado, pulando coleta de JS...")
+            Logger.warning("getJS not found, skipping JS collection...")
             return None
 
-        Logger.info("Coletando arquivos JS com getJS...")
+        Logger.info("Collecting JS files with getJS...")
 
         js_file = self.output_mgr.get_path('js', 'js_files.txt')
 
@@ -461,19 +461,19 @@ class URLCollector:
             with open(js_file, 'w') as f:
                 f.write('\n'.join(js_urls) + '\n')
 
-            Logger.success(f"Arquivos JS: {len(js_urls)}")
+            Logger.success(f"JS files: {len(js_urls)}")
             return js_file
 
         except Exception as e:
-            Logger.warning(f"Erro no getJS: {e}")
+            Logger.warning(f"Error in getJS: {e}")
             return None
 
     def extract_from_js(self, js_file: Path) -> Set[str]:
-        """Extrai endpoints de arquivos JS"""
+        """Extract endpoints from JS files"""
         if not js_file or not ToolChecker.check_tool('subjs'):
             return set()
 
-        Logger.info("Extraindo endpoints de arquivos JS...")
+        Logger.info("Extracting endpoints from JS files...")
 
         try:
             result = subprocess.run(
@@ -485,25 +485,25 @@ class URLCollector:
             )
 
             urls = set(line.strip() for line in result.stdout.split('\n') if line.strip())
-            Logger.success(f"Endpoints extraídos do JS: {len(urls)}")
+            Logger.success(f"Endpoints extracted from JS: {len(urls)}")
             return urls
 
         except Exception as e:
-            Logger.warning(f"Erro no subjs: {e}")
+            Logger.warning(f"Error in subjs: {e}")
             return set()
 
     def clean_urls(self, urls: Set[str]) -> Path:
-        """Limpa e normaliza URLs"""
+        """Clean and normalize URLs"""
         if not ToolChecker.check_tool('uro'):
-            Logger.warning("uro não encontrado, salvando URLs sem limpeza...")
+            Logger.warning("uro not found, saving URLs without cleaning...")
             clean_file = self.output_mgr.get_path('urls', 'urls_clean.txt')
             with open(clean_file, 'w') as f:
                 f.write('\n'.join(sorted(urls)) + '\n')
             return clean_file
 
-        Logger.info("Limpando URLs com uro...")
+        Logger.info("Cleaning URLs with uro...")
 
-        # Salva temporário
+        # Save temporary
         temp_file = self.output_mgr.get_path('urls', 'temp_urls.txt')
         with open(temp_file, 'w') as f:
             f.write('\n'.join(urls) + '\n')
@@ -528,29 +528,29 @@ class URLCollector:
             with open(clean_file, 'r') as f:
                 count = sum(1 for _ in f)
 
-            Logger.success(f"URLs limpas: {count}")
+            Logger.success(f"Clean URLs: {count}")
             return clean_file
 
         except Exception as e:
-            Logger.error(f"Erro no uro: {e}")
+            Logger.error(f"Error in uro: {e}")
             temp_file.rename(clean_file)
             return clean_file
 
 
 class TakeoverChecker:
-    """Verifica subdomain takeover"""
+    """Check for subdomain takeover"""
 
     def __init__(self, output_mgr: OutputManager):
         self.output_mgr = output_mgr
 
     def check_with_subzy(self, subdomains_file: Path):
-        """Verifica takeover com subzy"""
+        """Check takeover with subzy"""
         if not ToolChecker.check_tool('subzy'):
-            Logger.warning("subzy não encontrado, pulando takeover check...")
+            Logger.warning("subzy not found, skipping takeover check...")
             return
 
-        Logger.header("VERIFICAÇÃO DE TAKEOVER")
-        Logger.info("Verificando takeover com subzy...")
+        Logger.header("TAKEOVER CHECK")
+        Logger.info("Checking takeover with subzy...")
 
         output_file = self.output_mgr.get_path('takeover', 'subzy_results.txt')
 
@@ -566,22 +566,22 @@ class TakeoverChecker:
                 f.write(result.stdout)
 
             if result.stdout.strip():
-                Logger.warning(f"Possíveis takeovers encontrados! Veja {output_file.name}")
+                Logger.warning(f"Possible takeovers found! See {output_file.name}")
             else:
-                Logger.success("Nenhum takeover detectado")
+                Logger.success("No takeover detected")
 
         except Exception as e:
-            Logger.warning(f"Erro no subzy: {e}")
+            Logger.warning(f"Error in subzy: {e}")
 
 
 class WebEnum:
-    """Classe principal de enumeração"""
+    """Main enumeration class"""
 
     def __init__(self, domain: str, output_dir: str = './results'):
         self.domain = domain
         self.output_mgr = OutputManager(output_dir, domain)
 
-        # Componentes
+        # Components
         self.subdomain_enum = SubdomainEnum(domain, self.output_mgr)
         self.dns_resolver = DNSResolver(self.output_mgr)
         self.http_prober = HTTPProber(self.output_mgr)
@@ -589,15 +589,15 @@ class WebEnum:
         self.takeover_checker = TakeoverChecker(self.output_mgr)
 
     def run_full_enum(self, skip_screenshots: bool = False):
-        """Executa enumeração completa"""
+        """Run complete enumeration"""
         start_time = time.time()
 
-        Logger.header(f"ENUMERAÇÃO WEB: {self.domain}")
+        Logger.header(f"WEB ENUMERATION: {self.domain}")
 
-        # 1. Enumeração de subdomínios
+        # 1. Subdomain enumeration
         subs_file = self.subdomain_enum.run_all()
 
-        # 2. Resolução DNS
+        # 2. DNS Resolution
         resolved_file = self.dns_resolver.resolve_with_puredns(subs_file)
         self.dns_resolver.enrich_with_dnsx(resolved_file)
 
@@ -605,21 +605,21 @@ class WebEnum:
         alive_file = self.http_prober.probe_with_httpx(resolved_file)
 
         if not alive_file:
-            Logger.error("Nenhum host ativo encontrado! Abortando...")
+            Logger.error("No active hosts found! Aborting...")
             return
 
-        # 4. Screenshots (opcional)
+        # 4. Screenshots (optional)
         if not skip_screenshots:
             self.http_prober.screenshot_with_gowitness(alive_file)
 
-        # 5. Coleta de URLs
+        # 5. URL Collection
         all_urls = set()
 
-        # 5a. Arquivos históricos
+        # 5a. Historical archives
         archive_urls = self.url_collector.collect_from_archives(alive_file)
         all_urls.update(archive_urls)
 
-        # 5b. Crawling live
+        # 5b. Live crawling
         crawl_urls = self.url_collector.crawl_live(alive_file)
         all_urls.update(crawl_urls)
 
@@ -629,27 +629,27 @@ class WebEnum:
             js_urls = self.url_collector.extract_from_js(js_file)
             all_urls.update(js_urls)
 
-        # 6. Limpeza de URLs
+        # 6. URL Cleaning
         if all_urls:
             self.url_collector.clean_urls(all_urls)
 
         # 7. Takeover check
         self.takeover_checker.check_with_subzy(resolved_file)
 
-        # Relatório final
+        # Final report
         elapsed = time.time() - start_time
         self._print_summary(elapsed)
 
     def _print_summary(self, elapsed_time: float):
-        """Imprime sumário final"""
-        Logger.header("SUMÁRIO FINAL")
+        """Print final summary"""
+        Logger.header("FINAL SUMMARY")
 
         summary = {
-            "Subdomínios": self.output_mgr.get_path('subdomains', 'all_subdomains.txt'),
-            "Hosts resolvidos": self.output_mgr.get_path('dns', 'resolved.txt'),
-            "Hosts ativos": self.output_mgr.get_path('http', 'alive.txt'),
-            "URLs coletadas": self.output_mgr.get_path('urls', 'urls_clean.txt'),
-            "Arquivos JS": self.output_mgr.get_path('js', 'js_files.txt'),
+            "Subdomains": self.output_mgr.get_path('subdomains', 'all_subdomains.txt'),
+            "Resolved hosts": self.output_mgr.get_path('dns', 'resolved.txt'),
+            "Active hosts": self.output_mgr.get_path('http', 'alive.txt'),
+            "Collected URLs": self.output_mgr.get_path('urls', 'urls_clean.txt'),
+            "JS files": self.output_mgr.get_path('js', 'js_files.txt'),
         }
 
         for name, path in summary.items():
@@ -661,8 +661,8 @@ class WebEnum:
                 except:
                     pass
 
-        Logger.success(f"\nTempo total: {elapsed_time/60:.2f} minutos")
-        Logger.success(f"Resultados salvos em: {self.output_mgr.base_dir}")
+        Logger.success(f"\nTotal time: {elapsed_time/60:.2f} minutes")
+        Logger.success(f"Results saved to: {self.output_mgr.base_dir}")
 
 
 def main():
@@ -679,70 +679,70 @@ def main():
     print(banner)
 
     parser = argparse.ArgumentParser(
-        description='WebEnum - Ferramenta completa de enumeração web',
+        description='WebEnum - Complete web enumeration tool',
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
     parser.add_argument(
         '-d', '--domain',
         required=True,
-        help='Domínio alvo (ex: example.com)'
+        help='Target domain (e.g.: example.com)'
     )
 
     parser.add_argument(
         '-o', '--output',
         default='./results',
-        help='Diretório de output (padrão: ./results)'
+        help='Output directory (default: ./results)'
     )
 
     parser.add_argument(
         '--skip-screenshots',
         action='store_true',
-        help='Pula captura de screenshots'
+        help='Skip screenshot capture'
     )
 
     parser.add_argument(
         '--check-tools',
         action='store_true',
-        help='Verifica ferramentas instaladas e sai'
+        help='Check installed tools and exit'
     )
 
     args = parser.parse_args()
 
-    # Verifica ferramentas
+    # Check tools
     if args.check_tools:
-        Logger.header("VERIFICAÇÃO DE FERRAMENTAS")
+        Logger.header("TOOL CHECK")
         status = ToolChecker.check_all(check_optional=True)
 
-        Logger.success("Disponíveis:")
+        Logger.success("Available:")
         for tool in status['available']:
             print(f"  ✓ {tool}")
 
         if status['missing']:
-            Logger.warning("\nFaltando:")
+            Logger.warning("\nMissing:")
             for tool in status['missing']:
                 print(f"  ✗ {tool}")
 
         sys.exit(0)
 
-    # Verifica ferramentas críticas
+    # Check critical tools
     critical_tools = ['subfinder', 'httpx']
     missing_critical = [t for t in critical_tools if not ToolChecker.check_tool(t)]
 
     if missing_critical:
-        Logger.error(f"Ferramentas críticas faltando: {', '.join(missing_critical)}")
-        Logger.info("Instale com: go install -v github.com/projectdiscovery/<tool>/cmd/<tool>@latest")
+        Logger.error(f"Missing critical tools: {', '.join(missing_critical)}")
+        Logger.info("Install with: go install -v github.com/projectdiscovery/<tool>/cmd/<tool>@latest")
         sys.exit(1)
 
-    # Inicia enumeração
+    # Start enumeration
     try:
         enum = WebEnum(args.domain, args.output)
         enum.run_full_enum(skip_screenshots=args.skip_screenshots)
     except KeyboardInterrupt:
-        Logger.warning("\nInterrompido pelo usuário")
+        Logger.warning("\nInterrupted by user")
         sys.exit(1)
     except Exception as e:
-        Logger.error(f"Erro fatal: {e}")
+        Logger.error(f"Fatal error: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)

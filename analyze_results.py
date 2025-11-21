@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 WebEnum Results Analyzer
-Analisa e gera relatórios dos resultados da enumeração
+Analyzes and generates reports from enumeration results
 """
 
 import os
@@ -25,28 +25,28 @@ class Colors:
 
 
 class ResultsAnalyzer:
-    """Analisa resultados da enumeração"""
+    """Analyzes enumeration results"""
 
     def __init__(self, results_dir: str):
         self.results_dir = Path(results_dir)
 
         if not self.results_dir.exists():
-            print(f"{Colors.FAIL}[-] Diretório não encontrado: {results_dir}{Colors.ENDC}")
+            print(f"{Colors.FAIL}[-] Directory not found: {results_dir}{Colors.ENDC}")
             sys.exit(1)
 
         self.load_data()
 
     def load_data(self):
-        """Carrega todos os dados"""
-        print(f"{Colors.OKBLUE}[*] Carregando dados de {self.results_dir}{Colors.ENDC}")
+        """Load all data"""
+        print(f"{Colors.OKBLUE}[*] Loading data from {self.results_dir}{Colors.ENDC}")
 
-        # Subdomínios
+        # Subdomains
         self.subdomains = self._load_txt('subdomains/all_subdomains.txt')
 
-        # Hosts resolvidos
+        # Resolved hosts
         self.resolved = self._load_txt('dns/resolved.txt')
 
-        # Hosts ativos
+        # Active hosts
         self.alive = self._load_txt('http/alive.txt')
 
         # HTTPx JSON
@@ -59,7 +59,7 @@ class ResultsAnalyzer:
         self.js_files = self._load_txt('js/js_files.txt')
 
     def _load_txt(self, relative_path: str) -> Set[str]:
-        """Carrega arquivo de texto"""
+        """Load text file"""
         file_path = self.results_dir / relative_path
 
         if not file_path.exists():
@@ -69,7 +69,7 @@ class ResultsAnalyzer:
             return set(line.strip() for line in f if line.strip())
 
     def _load_httpx_json(self, relative_path: str) -> List[Dict]:
-        """Carrega arquivo JSON do httpx"""
+        """Load httpx JSON file"""
         file_path = self.results_dir / relative_path
 
         if not file_path.exists():
@@ -86,28 +86,28 @@ class ResultsAnalyzer:
         return data
 
     def print_summary(self):
-        """Imprime sumário geral"""
+        """Print general summary"""
         print(f"\n{Colors.HEADER}{Colors.BOLD}{'='*60}{Colors.ENDC}")
-        print(f"{Colors.HEADER}{Colors.BOLD}{'SUMÁRIO GERAL'.center(60)}{Colors.ENDC}")
+        print(f"{Colors.HEADER}{Colors.BOLD}{'GENERAL SUMMARY'.center(60)}{Colors.ENDC}")
         print(f"{Colors.HEADER}{Colors.BOLD}{'='*60}{Colors.ENDC}\n")
 
         stats = [
-            ("Subdomínios encontrados", len(self.subdomains)),
-            ("Subdomínios resolvidos", len(self.resolved)),
-            ("Hosts com HTTP ativo", len(self.alive)),
-            ("URLs coletadas", len(self.urls)),
-            ("Arquivos JavaScript", len(self.js_files)),
+            ("Subdomains found", len(self.subdomains)),
+            ("Resolved subdomains", len(self.resolved)),
+            ("Active HTTP hosts", len(self.alive)),
+            ("Collected URLs", len(self.urls)),
+            ("JavaScript files", len(self.js_files)),
         ]
 
         for name, count in stats:
             print(f"{Colors.OKGREEN}[+]{Colors.ENDC} {name:.<45} {Colors.OKBLUE}{count}{Colors.ENDC}")
 
     def analyze_technologies(self):
-        """Analisa tecnologias detectadas"""
-        print(f"\n{Colors.HEADER}{Colors.BOLD}{'TECNOLOGIAS DETECTADAS'}{Colors.ENDC}\n")
+        """Analyze detected technologies"""
+        print(f"\n{Colors.HEADER}{Colors.BOLD}{'DETECTED TECHNOLOGIES'}{Colors.ENDC}\n")
 
         if not self.http_data:
-            print(f"{Colors.WARNING}[!] Sem dados de tecnologia{Colors.ENDC}")
+            print(f"{Colors.WARNING}[!] No technology data{Colors.ENDC}")
             return
 
         tech_counter = Counter()
@@ -118,7 +118,7 @@ class ResultsAnalyzer:
                 tech_counter[tech] += 1
 
         if not tech_counter:
-            print(f"{Colors.WARNING}[!] Nenhuma tecnologia detectada{Colors.ENDC}")
+            print(f"{Colors.WARNING}[!] No technologies detected{Colors.ENDC}")
             return
 
         # Top 15
@@ -127,11 +127,11 @@ class ResultsAnalyzer:
             print(f"  {Colors.OKCYAN}{tech:.<40}{Colors.ENDC} {bar} {count}")
 
     def analyze_status_codes(self):
-        """Analisa códigos de status HTTP"""
-        print(f"\n{Colors.HEADER}{Colors.BOLD}{'CÓDIGOS DE STATUS HTTP'}{Colors.ENDC}\n")
+        """Analyze HTTP status codes"""
+        print(f"\n{Colors.HEADER}{Colors.BOLD}{'HTTP STATUS CODES'}{Colors.ENDC}\n")
 
         if not self.http_data:
-            print(f"{Colors.WARNING}[!] Sem dados HTTP{Colors.ENDC}")
+            print(f"{Colors.WARNING}[!] No HTTP data{Colors.ENDC}")
             return
 
         status_counter = Counter()
@@ -145,11 +145,11 @@ class ResultsAnalyzer:
             print(f"  {color}{status}{Colors.ENDC} {'█' * min(count, 40)} {count}")
 
     def find_interesting_hosts(self):
-        """Encontra hosts interessantes"""
-        print(f"\n{Colors.HEADER}{Colors.BOLD}{'HOSTS INTERESSANTES'}{Colors.ENDC}\n")
+        """Find interesting hosts"""
+        print(f"\n{Colors.HEADER}{Colors.BOLD}{'INTERESTING HOSTS'}{Colors.ENDC}\n")
 
         if not self.http_data:
-            print(f"{Colors.WARNING}[!] Sem dados HTTP{Colors.ENDC}")
+            print(f"{Colors.WARNING}[!] No HTTP data{Colors.ENDC}")
             return
 
         interesting = defaultdict(list)
@@ -164,7 +164,7 @@ class ResultsAnalyzer:
             if any(keyword in title.lower() for keyword in ['admin', 'login', 'dashboard', 'panel']):
                 interesting['Admin/Login Pages'].append((url, title, status))
 
-            # Páginas de erro interessantes
+            # Interesting error pages
             if status in [403, 401]:
                 interesting['Forbidden/Unauthorized'].append((url, title, status))
 
@@ -177,11 +177,11 @@ class ResultsAnalyzer:
             if 'api' in url.lower() or any('api' in t.lower() for t in techs):
                 interesting['APIs'].append((url, ', '.join(techs), status))
 
-        # Imprime resultados
+        # Print results
         for category, items in interesting.items():
             if items:
                 print(f"{Colors.OKGREEN}[+] {category}:{Colors.ENDC}")
-                for item in items[:10]:  # Limita a 10 por categoria
+                for item in items[:10]:  # Limit to 10 per category
                     url, info, status = item
                     print(f"    [{status}] {url}")
                     if info:
@@ -189,26 +189,26 @@ class ResultsAnalyzer:
                 print()
 
     def analyze_urls(self):
-        """Analisa URLs coletadas"""
-        print(f"\n{Colors.HEADER}{Colors.BOLD}{'ANÁLISE DE URLs'}{Colors.ENDC}\n")
+        """Analyze collected URLs"""
+        print(f"\n{Colors.HEADER}{Colors.BOLD}{'URL ANALYSIS'}{Colors.ENDC}\n")
 
         if not self.urls:
-            print(f"{Colors.WARNING}[!] Nenhuma URL coletada{Colors.ENDC}")
+            print(f"{Colors.WARNING}[!] No URLs collected{Colors.ENDC}")
             return
 
-        # Extensões
+        # Extensions
         extensions = Counter()
         for url in self.urls:
             match = re.search(r'\.([a-z0-9]+)(?:\?|$)', url.lower())
             if match:
                 extensions[match.group(1)] += 1
 
-        print(f"{Colors.OKGREEN}[+] Extensões de arquivo encontradas:{Colors.ENDC}")
+        print(f"{Colors.OKGREEN}[+] File extensions found:{Colors.ENDC}")
         for ext, count in extensions.most_common(15):
             print(f"    .{ext:.<20} {count}")
 
-        # Parâmetros interessantes
-        print(f"\n{Colors.OKGREEN}[+] Parâmetros interessantes:{Colors.ENDC}")
+        # Interesting parameters
+        print(f"\n{Colors.OKGREEN}[+] Interesting parameters:{Colors.ENDC}")
         interesting_params = ['id', 'user', 'admin', 'debug', 'file', 'path', 'url', 'redirect', 'page']
         param_urls = []
 
@@ -224,19 +224,19 @@ class ResultsAnalyzer:
         for param, count in param_counter.most_common(10):
             print(f"    {param:.<20} {count}")
 
-        # Exemplos de URLs com params interessantes
+        # Sample URLs with interesting params
         if param_urls:
-            print(f"\n{Colors.OKGREEN}[+] Exemplos de URLs (primeiras 5):{Colors.ENDC}")
+            print(f"\n{Colors.OKGREEN}[+] Sample URLs (first 5):{Colors.ENDC}")
             for param, url in param_urls[:5]:
                 print(f"    [{param}] {url[:100]}")
 
     def find_potential_vulnerabilities(self):
-        """Busca padrões que podem indicar vulnerabilidades"""
-        print(f"\n{Colors.HEADER}{Colors.BOLD}{'POTENCIAIS ÁREAS DE INTERESSE'}{Colors.ENDC}\n")
+        """Search for patterns that may indicate vulnerabilities"""
+        print(f"\n{Colors.HEADER}{Colors.BOLD}{'POTENTIAL AREAS OF INTEREST'}{Colors.ENDC}\n")
 
         findings = defaultdict(list)
 
-        # Analisa URLs
+        # Analyze URLs
         for url in self.urls:
             url_lower = url.lower()
 
@@ -256,7 +256,7 @@ class ResultsAnalyzer:
             if any(pattern in url_lower for pattern in ['url=', 'uri=', 'host=', 'target=']):
                 findings['SSRF'].append(url)
 
-        # Analisa hosts
+        # Analyze hosts
         for entry in self.http_data:
             url = entry.get('url', '')
             title = entry.get('title', '').lower()
@@ -273,61 +273,61 @@ class ResultsAnalyzer:
             if any(keyword in title for keyword in ['debug', 'stacktrace', 'exception']):
                 findings['Debug/Error Pages'].append(url)
 
-        # Imprime findings
+        # Print findings
         if not findings:
-            print(f"{Colors.OKGREEN}[+] Nenhum padrão óbvio detectado{Colors.ENDC}")
+            print(f"{Colors.OKGREEN}[+] No obvious patterns detected{Colors.ENDC}")
             return
 
         for vuln_type, urls in findings.items():
             if urls:
-                print(f"{Colors.WARNING}[!] {vuln_type}: {len(urls)} potencial(is){Colors.ENDC}")
-                for url in urls[:3]:  # Mostra apenas 3 exemplos
+                print(f"{Colors.WARNING}[!] {vuln_type}: {len(urls)} potential{Colors.ENDC}")
+                for url in urls[:3]:  # Show only 3 examples
                     print(f"    → {url[:100]}")
                 if len(urls) > 3:
-                    print(f"    ... e mais {len(urls) - 3}")
+                    print(f"    ... and {len(urls) - 3} more")
                 print()
 
     def export_report(self, output_file: str):
-        """Exporta relatório em markdown"""
-        print(f"\n{Colors.OKBLUE}[*] Exportando relatório para {output_file}{Colors.ENDC}")
+        """Export report to markdown"""
+        print(f"\n{Colors.OKBLUE}[*] Exporting report to {output_file}{Colors.ENDC}")
 
         report_lines = []
 
         # Header
         report_lines.append(f"# WebEnum Analysis Report")
-        report_lines.append(f"\n**Diretório:** `{self.results_dir}`\n")
+        report_lines.append(f"\n**Directory:** `{self.results_dir}`\n")
 
         # Summary
-        report_lines.append("## Sumário Geral\n")
-        report_lines.append(f"- **Subdomínios encontrados:** {len(self.subdomains)}")
-        report_lines.append(f"- **Subdomínios resolvidos:** {len(self.resolved)}")
-        report_lines.append(f"- **Hosts com HTTP ativo:** {len(self.alive)}")
-        report_lines.append(f"- **URLs coletadas:** {len(self.urls)}")
-        report_lines.append(f"- **Arquivos JavaScript:** {len(self.js_files)}\n")
+        report_lines.append("## General Summary\n")
+        report_lines.append(f"- **Subdomains found:** {len(self.subdomains)}")
+        report_lines.append(f"- **Resolved subdomains:** {len(self.resolved)}")
+        report_lines.append(f"- **Active HTTP hosts:** {len(self.alive)}")
+        report_lines.append(f"- **Collected URLs:** {len(self.urls)}")
+        report_lines.append(f"- **JavaScript files:** {len(self.js_files)}\n")
 
         # Technologies
-        report_lines.append("## Tecnologias Detectadas\n")
+        report_lines.append("## Detected Technologies\n")
         tech_counter = Counter()
         for entry in self.http_data:
             for tech in entry.get('tech', []):
                 tech_counter[tech] += 1
 
         if tech_counter:
-            report_lines.append("| Tecnologia | Quantidade |")
-            report_lines.append("|------------|-----------|")
+            report_lines.append("| Technology | Count |")
+            report_lines.append("|------------|-------|")
             for tech, count in tech_counter.most_common(20):
                 report_lines.append(f"| {tech} | {count} |")
         report_lines.append("")
 
         # Status Codes
-        report_lines.append("## Códigos de Status\n")
+        report_lines.append("## Status Codes\n")
         status_counter = Counter()
         for entry in self.http_data:
             status_counter[entry.get('status_code', 0)] += 1
 
         if status_counter:
-            report_lines.append("| Status | Quantidade |")
-            report_lines.append("|--------|-----------|")
+            report_lines.append("| Status | Count |")
+            report_lines.append("|--------|-------|")
             for status, count in sorted(status_counter.items()):
                 report_lines.append(f"| {status} | {count} |")
         report_lines.append("")
@@ -336,37 +336,37 @@ class ResultsAnalyzer:
         with open(output_file, 'w') as f:
             f.write('\n'.join(report_lines))
 
-        print(f"{Colors.OKGREEN}[+] Relatório salvo!{Colors.ENDC}")
+        print(f"{Colors.OKGREEN}[+] Report saved!{Colors.ENDC}")
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Analisa resultados do WebEnum',
+        description='Analyze WebEnum results',
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
     parser.add_argument(
         'results_dir',
-        help='Diretório com os resultados (ex: results/example.com_20250121_123456/)'
+        help='Directory with results (e.g.: results/example.com_20250121_123456/)'
     )
 
     parser.add_argument(
         '--export',
-        help='Exportar relatório para arquivo markdown'
+        help='Export report to markdown file'
     )
 
     parser.add_argument(
         '--summary-only',
         action='store_true',
-        help='Mostrar apenas sumário'
+        help='Show summary only'
     )
 
     args = parser.parse_args()
 
-    # Analisa
+    # Analyze
     analyzer = ResultsAnalyzer(args.results_dir)
 
-    # Sumário sempre
+    # Summary always shown
     analyzer.print_summary()
 
     if not args.summary_only:
@@ -376,11 +376,11 @@ def main():
         analyzer.analyze_urls()
         analyzer.find_potential_vulnerabilities()
 
-    # Exporta se solicitado
+    # Export if requested
     if args.export:
         analyzer.export_report(args.export)
 
-    print(f"\n{Colors.OKGREEN}[+] Análise concluída!{Colors.ENDC}\n")
+    print(f"\n{Colors.OKGREEN}[+] Analysis complete!{Colors.ENDC}\n")
 
 
 if __name__ == '__main__':
