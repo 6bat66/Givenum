@@ -1,4 +1,4 @@
-# WebEnum - Comprehensive Web Enumeration Toolkit
+# Givenum - Comprehensive Web Enumeration Toolkit
 
 🎯 **Complete automated web enumeration tool** that collects maximum information about a domain without invasive scanning.
 
