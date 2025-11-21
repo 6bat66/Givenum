@@ -1,0 +1,12 @@
+# Exemplo de arquivo de domínios para batch_enum.sh
+# Linhas começando com # são ignoradas
+# Uma linha por domínio, sem http:// ou https://
+
+# Exemplo de uso:
+# ./batch_enum.sh domains_example.txt --skip-screenshots
+
+# Domínios de exemplo (remova o # para usar):
+# example.com
+# target1.com
+# target2.com
+# sub.target3.com
