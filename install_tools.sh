@@ -1,38 +1,38 @@
 #!/bin/bash
 
 # ============================================================================
-# WebEnum - Script de Instalação de Ferramentas
+# WebEnum - Tools Installation Script
 # ============================================================================
-# Instala automaticamente todas as ferramentas necessárias para o WebEnum
+# Automatically installs all tools required for WebEnum
 # ============================================================================
 
 set -e
 
-# Cores
+# Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Funções auxiliares
+# Helper functions
 info() { echo -e "${BLUE}[*]${NC} $1"; }
 success() { echo -e "${GREEN}[+]${NC} $1"; }
 warning() { echo -e "${YELLOW}[!]${NC} $1"; }
 error() { echo -e "${RED}[-]${NC} $1"; }
 header() { echo -e "\n${BLUE}========================================${NC}"; echo -e "${BLUE}$1${NC}"; echo -e "${BLUE}========================================${NC}\n"; }
 
-# Verifica se comando existe
+# Check if command exists
 command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
-# Verifica Go
+# Check Go
 check_go() {
     if ! command_exists go; then
-        error "Go não está instalado!"
+        error "Go is not installed!"
         echo ""
-        echo "Instale Go primeiro:"
+        echo "Install Go first:"
         echo "  Ubuntu/Debian: sudo apt install golang-go"
         echo "  macOS: brew install go"
         echo "  Manual: https://go.dev/dl/"
@@ -41,56 +41,67 @@ check_go() {
     fi
 
     GO_VERSION=$(go version | awk '{print $3}' | sed 's/go//')
-    success "Go $GO_VERSION detectado"
+    success "Go $GO_VERSION detected"
 }
 
-# Verifica Python3
+# Check Python3
 check_python() {
     if ! command_exists python3; then
-        error "Python3 não está instalado!"
+        error "Python3 is not installed!"
         exit 1
     fi
 
     PYTHON_VERSION=$(python3 --version | awk '{print $2}')
-    success "Python $PYTHON_VERSION detectado"
+    success "Python $PYTHON_VERSION detected"
 }
 
-# Instala ferramenta Go
+# Install Go tool
 install_go_tool() {
     local package=$1
     local name=$2
 
     if command_exists "$name"; then
-        warning "$name já está instalado, pulando..."
+        warning "$name is already installed, skipping..."
         return 0
     fi
 
-    info "Instalando $name..."
+    info "Installing $name..."
     if go install -v "$package@latest" 2>/dev/null; then
-        success "$name instalado com sucesso"
+        success "$name installed successfully"
         return 0
     else
-        error "Falha ao instalar $name"
+        error "Failed to install $name"
         return 1
     fi
 }
 
-# Instala ferramenta Python
+# Install Python tool
 install_python_tool() {
     local package=$1
     local name=$2
 
-    if command_exists "$name"; then
-        warning "$name já está instalado, pulando..."
+    if command_exists "$name" || python3 -c "import $package" 2>/dev/null; then
+        warning "$name is already installed, skipping..."
         return 0
     fi
 
-    info "Instalando $name via pip..."
-    if pip3 install "$package" --quiet 2>/dev/null; then
-        success "$name instalado com sucesso"
+    info "Installing $name via pip..."
+    
+    # Try pip3 install with user flag first (works without sudo)
+    if python3 -m pip install --user "$package" 2>/dev/null; then
+        success "$name installed successfully"
+        return 0
+    # Try pipx if available (recommended for CLI tools)
+    elif command_exists pipx && pipx install "$package" 2>/dev/null; then
+        success "$name installed successfully via pipx"
+        return 0
+    # Try regular pip3
+    elif pip3 install "$package" 2>/dev/null; then
+        success "$name installed successfully"
         return 0
     else
-        error "Falha ao instalar $name"
+        error "Failed to install $name"
+        warning "Try manually: python3 -m pip install --user $package"
         return 1
     fi
 }
@@ -99,45 +110,63 @@ install_python_tool() {
 # MAIN
 # ============================================================================
 
-header "WEBENUM - INSTALAÇÃO DE FERRAMENTAS"
+header "WEBENUM - TOOLS INSTALLATION"
 
-# Verifica dependências
-info "Verificando dependências básicas..."
+# Check basic dependencies
+info "Checking basic dependencies..."
 check_go
 check_python
 
-# Configura GOPATH se não estiver configurado
+# Configure GOPATH if not set
 if [ -z "$GOPATH" ]; then
     export GOPATH="$HOME/go"
-    warning "GOPATH não configurado, usando: $GOPATH"
+    warning "GOPATH not configured, using: $GOPATH"
 fi
 
-# Adiciona Go bin ao PATH
+# Add Go bin to PATH
 export PATH="$PATH:$GOPATH/bin"
 
-# Verifica se Go bin está no PATH permanentemente
-if ! grep -q 'export PATH=$PATH:$(go env GOPATH)/bin' ~/.bashrc 2>/dev/null; then
-    info "Adicionando Go bin ao PATH permanentemente..."
-    echo '' >> ~/.bashrc
-    echo '# Go binaries' >> ~/.bashrc
-    echo 'export PATH=$PATH:$(go env GOPATH)/bin' >> ~/.bashrc
-    success "PATH configurado! Execute: source ~/.bashrc"
+# Check if Go bin is permanently in PATH
+SHELL_CONFIG="$HOME/.bashrc"
+if [ -f "$HOME/.zshrc" ]; then
+    SHELL_CONFIG="$HOME/.zshrc"
+fi
+
+if ! grep -q 'export PATH=$PATH:$(go env GOPATH)/bin' "$SHELL_CONFIG" 2>/dev/null; then
+    info "Adding Go bin to PATH permanently..."
+    echo '' >> "$SHELL_CONFIG"
+    echo '# Go binaries' >> "$SHELL_CONFIG"
+    echo 'export PATH=$PATH:$(go env GOPATH)/bin' >> "$SHELL_CONFIG"
+    success "PATH configured! Run: source $SHELL_CONFIG"
+fi
+
+# Ensure Python user bin is in PATH
+PYTHON_USER_BIN=$(python3 -m site --user-base)/bin
+if [ -d "$PYTHON_USER_BIN" ]; then
+    export PATH="$PATH:$PYTHON_USER_BIN"
+    
+    if ! grep -q "$(python3 -m site --user-base)/bin" "$SHELL_CONFIG" 2>/dev/null; then
+        info "Adding Python user bin to PATH..."
+        echo '' >> "$SHELL_CONFIG"
+        echo '# Python user binaries' >> "$SHELL_CONFIG"
+        echo 'export PATH=$PATH:'"$(python3 -m site --user-base)/bin" >> "$SHELL_CONFIG"
+    fi
 fi
 
 # ============================================================================
-# FERRAMENTAS CRÍTICAS (obrigatórias)
+# CRITICAL TOOLS (required)
 # ============================================================================
 
-header "INSTALANDO FERRAMENTAS CRÍTICAS"
+header "INSTALLING CRITICAL TOOLS"
 
 install_go_tool "github.com/projectdiscovery/subfinder/v2/cmd/subfinder" "subfinder"
 install_go_tool "github.com/projectdiscovery/httpx/cmd/httpx" "httpx"
 
 # ============================================================================
-# FERRAMENTAS RECOMENDADAS (alta prioridade)
+# RECOMMENDED TOOLS (high priority)
 # ============================================================================
 
-header "INSTALANDO FERRAMENTAS RECOMENDADAS"
+header "INSTALLING RECOMMENDED TOOLS"
 
 install_go_tool "github.com/tomnomnom/assetfinder" "assetfinder"
 install_go_tool "github.com/projectdiscovery/dnsx/cmd/dnsx" "dnsx"
@@ -150,16 +179,16 @@ install_go_tool "github.com/tomnomnom/anew" "anew"
 # Uro (Python)
 install_python_tool "uro" "uro"
 
-# Findomain (download direto)
+# Findomain (direct download)
 if ! command_exists findomain; then
-    info "Instalando findomain..."
+    info "Installing findomain..."
 
     ARCH=$(uname -m)
     OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 
     case "$ARCH" in
         x86_64) ARCH="amd64" ;;
-        aarch64) ARCH="arm64" ;;
+        aarch64|arm64) ARCH="arm64" ;;
     esac
 
     FINDOMAIN_URL="https://github.com/Findomain/Findomain/releases/latest/download/findomain-${OS}-${ARCH}.zip"
@@ -171,36 +200,36 @@ if ! command_exists findomain; then
         unzip -q "findomain-${OS}-${ARCH}.zip" 2>/dev/null
         chmod +x findomain
 
-        # Tenta instalar em /usr/local/bin, senão em $GOPATH/bin
+        # Try to install in /usr/local/bin, otherwise in $GOPATH/bin
         if sudo mv findomain /usr/local/bin/ 2>/dev/null; then
-            success "findomain instalado em /usr/local/bin/"
+            success "findomain installed in /usr/local/bin/"
         elif mv findomain "$GOPATH/bin/" 2>/dev/null; then
-            success "findomain instalado em $GOPATH/bin/"
+            success "findomain installed in $GOPATH/bin/"
         else
-            warning "Não foi possível mover findomain para PATH, copie manualmente de $TMP_DIR"
+            warning "Could not move findomain to PATH, manually copy from $TMP_DIR"
         fi
     else
-        error "Falha ao baixar findomain"
+        error "Failed to download findomain"
     fi
 
     cd - >/dev/null
     rm -rf "$TMP_DIR"
 else
-    warning "findomain já está instalado, pulando..."
+    warning "findomain is already installed, skipping..."
 fi
 
 # ============================================================================
-# FERRAMENTAS OPCIONAIS (melhoram resultado)
+# OPTIONAL TOOLS (improve results)
 # ============================================================================
 
-header "INSTALANDO FERRAMENTAS OPCIONAIS"
+header "INSTALLING OPTIONAL TOOLS"
 
-read -p "$(echo -e ${YELLOW}Instalar ferramentas opcionais? Isso pode levar mais tempo. [y/N]: ${NC})" -n 1 -r
+read -p "$(echo -e ${YELLOW}Install optional tools? This may take longer. [y/N]: ${NC})" -n 1 -r
 echo
 if [[ $REPLY =~ ^[Yy]$ ]]; then
 
-    # Amass (pesado)
-    info "Amass pode levar vários minutos para compilar..."
+    # Amass (heavy)
+    info "Amass may take several minutes to compile..."
     install_go_tool "github.com/owasp-amass/amass/v4/...@master" "amass"
 
     # Gowitness
@@ -228,11 +257,11 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
     install_go_tool "github.com/tomnomnom/unfurl" "unfurl"
 
 else
-    info "Pulando ferramentas opcionais..."
+    info "Skipping optional tools..."
 fi
 
 # ============================================================================
-# WORDLISTS (opcional)
+# WORDLISTS (optional)
 # ============================================================================
 
 header "WORDLISTS"
@@ -240,12 +269,12 @@ header "WORDLISTS"
 WORDLIST_DIR="$HOME/.config/webenum/wordlists"
 
 if [ ! -d "$WORDLIST_DIR" ]; then
-    read -p "$(echo -e ${YELLOW}Baixar wordlists úteis? [y/N]: ${NC})" -n 1 -r
+    read -p "$(echo -e ${YELLOW}Download useful wordlists? [y/N]: ${NC})" -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         mkdir -p "$WORDLIST_DIR"
 
-        info "Baixando wordlists..."
+        info "Downloading wordlists..."
 
         # SecLists DNS
         if [ ! -f "$WORDLIST_DIR/subdomains.txt" ]; then
@@ -253,7 +282,7 @@ if [ ! -d "$WORDLIST_DIR" ]; then
                 -O "$WORDLIST_DIR/subdomains.txt" 2>/dev/null || \
             curl -sL https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/DNS/subdomains-top1million-110000.txt \
                 -o "$WORDLIST_DIR/subdomains.txt"
-            success "Wordlist de subdomínios baixada"
+            success "Subdomain wordlist downloaded"
         fi
 
         # SecLists Web
@@ -262,37 +291,37 @@ if [ ! -d "$WORDLIST_DIR" ]; then
                 -O "$WORDLIST_DIR/common.txt" 2>/dev/null || \
             curl -sL https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt \
                 -o "$WORDLIST_DIR/common.txt"
-            success "Wordlist web comum baixada"
+            success "Common web wordlist downloaded"
         fi
 
-        success "Wordlists salvas em $WORDLIST_DIR"
+        success "Wordlists saved to $WORDLIST_DIR"
     fi
 fi
 
 # ============================================================================
-# VERIFICAÇÃO FINAL
+# FINAL VERIFICATION
 # ============================================================================
 
-header "VERIFICAÇÃO FINAL"
+header "FINAL VERIFICATION"
 
 CRITICAL_TOOLS=("subfinder" "httpx")
 RECOMMENDED_TOOLS=("assetfinder" "findomain" "dnsx" "puredns" "gau" "waybackurls" "hakrawler" "anew" "uro")
 OPTIONAL_TOOLS=("amass" "gowitness" "getJS" "subjs" "subzy")
 
-info "Verificando instalação..."
+info "Verifying installation..."
 echo ""
 
-echo "Críticas:"
+echo "Critical:"
 for tool in "${CRITICAL_TOOLS[@]}"; do
     if command_exists "$tool"; then
         echo -e "  ${GREEN}✓${NC} $tool"
     else
-        echo -e "  ${RED}✗${NC} $tool ${RED}(FALTANDO!)${NC}"
+        echo -e "  ${RED}✗${NC} $tool ${RED}(MISSING!)${NC}"
     fi
 done
 
 echo ""
-echo "Recomendadas:"
+echo "Recommended:"
 for tool in "${RECOMMENDED_TOOLS[@]}"; do
     if command_exists "$tool"; then
         echo -e "  ${GREEN}✓${NC} $tool"
@@ -302,18 +331,18 @@ for tool in "${RECOMMENDED_TOOLS[@]}"; do
 done
 
 echo ""
-echo "Opcionais:"
+echo "Optional:"
 for tool in "${OPTIONAL_TOOLS[@]}"; do
     if command_exists "$tool"; then
         echo -e "  ${GREEN}✓${NC} $tool"
     else
-        echo -e "  ${YELLOW}○${NC} $tool (não instalado)"
+        echo -e "  ${YELLOW}○${NC} $tool (not installed)"
     fi
 done
 
 echo ""
-success "Instalação concluída!"
+success "Installation completed!"
 echo ""
-warning "IMPORTANTE: Execute 'source ~/.bashrc' ou abra um novo terminal"
+warning "IMPORTANT: Run 'source $SHELL_CONFIG' or open a new terminal"
 echo ""
-info "Para testar, execute: ./webenum.py --check-tools"
+info "To test, run: ./webenum.py --check-tools"
