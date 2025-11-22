@@ -4,6 +4,7 @@
 # WebEnum - Tools Installation Script
 # ============================================================================
 # Automatically installs all tools required for WebEnum
+# Supports: macOS (Intel/Apple Silicon) and Linux
 # ============================================================================
 
 set -e
@@ -22,6 +23,10 @@ warning() { echo -e "${YELLOW}[!]${NC} $1"; }
 error() { echo -e "${RED}[-]${NC} $1"; }
 header() { echo -e "\n${BLUE}========================================${NC}"; echo -e "${BLUE}$1${NC}"; echo -e "${BLUE}========================================${NC}\n"; }
 
+# Detect OS
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH=$(uname -m)
+
 # Check if command exists
 command_exists() {
     command -v "$1" >/dev/null 2>&1
@@ -33,8 +38,12 @@ check_go() {
         error "Go is not installed!"
         echo ""
         echo "Install Go first:"
-        echo "  Ubuntu/Debian: sudo apt install golang-go"
-        echo "  macOS: brew install go"
+        if [ "$OS" = "darwin" ]; then
+            echo "  brew install go"
+        else
+            echo "  Ubuntu/Debian: sudo apt install golang-go"
+            echo "  Fedora: sudo dnf install golang"
+        fi
         echo "  Manual: https://go.dev/dl/"
         echo ""
         exit 1
@@ -87,16 +96,14 @@ install_python_tool() {
 
     info "Installing $name via pip..."
     
-    # Try pip3 install with user flag first (works without sudo)
-    if python3 -m pip install --user "$package" 2>/dev/null; then
-        success "$name installed successfully"
-        return 0
-    # Try pipx if available (recommended for CLI tools)
-    elif command_exists pipx && pipx install "$package" 2>/dev/null; then
+    # Try multiple methods
+    if command_exists pipx && pipx install "$package" 2>/dev/null; then
         success "$name installed successfully via pipx"
         return 0
-    # Try regular pip3
-    elif pip3 install "$package" 2>/dev/null; then
+    elif python3 -m pip install --user "$package" 2>/dev/null; then
+        success "$name installed successfully"
+        return 0
+    elif pip3 install --user "$package" 2>/dev/null; then
         success "$name installed successfully"
         return 0
     else
@@ -106,16 +113,84 @@ install_python_tool() {
     fi
 }
 
+# Install massdns
+install_massdns() {
+    if command_exists massdns; then
+        warning "massdns is already installed, skipping..."
+        return 0
+    fi
+
+    info "Installing massdns..."
+
+    if [ "$OS" = "darwin" ]; then
+        # Try Homebrew first on macOS
+        if command_exists brew; then
+            info "Trying to install via Homebrew..."
+            if brew install massdns 2>/dev/null; then
+                success "massdns installed via Homebrew"
+                return 0
+            fi
+        fi
+    fi
+
+    # Compile from source
+    info "Compiling massdns from source..."
+    
+    TMP_DIR=$(mktemp -d)
+    cd "$TMP_DIR"
+
+    if git clone https://github.com/blechschmidt/massdns 2>/dev/null; then
+        cd massdns
+        
+        if make 2>/dev/null; then
+            # Try to install globally, fall back to local install
+            if sudo make install 2>/dev/null; then
+                success "massdns installed to /usr/local/bin"
+            elif cp bin/massdns "$GOPATH/bin/" 2>/dev/null; then
+                success "massdns installed to $GOPATH/bin"
+            else
+                warning "Could not move massdns to PATH"
+                warning "Manually copy from: $TMP_DIR/massdns/bin/massdns"
+            fi
+        else
+            error "Failed to compile massdns"
+            warning "You may need to install build tools:"
+            if [ "$OS" = "darwin" ]; then
+                echo "  xcode-select --install"
+            else
+                echo "  sudo apt install build-essential  # Ubuntu/Debian"
+                echo "  sudo dnf install gcc make  # Fedora"
+            fi
+        fi
+    else
+        error "Failed to clone massdns repository"
+    fi
+
+    cd - >/dev/null
+}
+
 # ============================================================================
 # MAIN
 # ============================================================================
 
 header "WEBENUM - TOOLS INSTALLATION"
 
+info "Detected OS: $OS ($ARCH)"
+
 # Check basic dependencies
 info "Checking basic dependencies..."
 check_go
 check_python
+
+# Check build tools
+if ! command_exists make || ! command_exists git; then
+    warning "Build tools (make, git) not found"
+    if [ "$OS" = "darwin" ]; then
+        info "Install: xcode-select --install"
+    else
+        info "Install: sudo apt install build-essential git  # Ubuntu/Debian"
+    fi
+fi
 
 # Configure GOPATH if not set
 if [ -z "$GOPATH" ]; then
@@ -126,12 +201,15 @@ fi
 # Add Go bin to PATH
 export PATH="$PATH:$GOPATH/bin"
 
-# Check if Go bin is permanently in PATH
+# Detect shell config
 SHELL_CONFIG="$HOME/.bashrc"
 if [ -f "$HOME/.zshrc" ]; then
     SHELL_CONFIG="$HOME/.zshrc"
+elif [ -f "$HOME/.bash_profile" ]; then
+    SHELL_CONFIG="$HOME/.bash_profile"
 fi
 
+# Check if Go bin is permanently in PATH
 if ! grep -q 'export PATH=$PATH:$(go env GOPATH)/bin' "$SHELL_CONFIG" 2>/dev/null; then
     info "Adding Go bin to PATH permanently..."
     echo '' >> "$SHELL_CONFIG"
@@ -163,14 +241,24 @@ install_go_tool "github.com/projectdiscovery/subfinder/v2/cmd/subfinder" "subfin
 install_go_tool "github.com/projectdiscovery/httpx/cmd/httpx" "httpx"
 
 # ============================================================================
+# DNS TOOLS (important)
+# ============================================================================
+
+header "INSTALLING DNS TOOLS"
+
+install_go_tool "github.com/projectdiscovery/dnsx/cmd/dnsx" "dnsx"
+install_go_tool "github.com/d3mondev/puredns/v2" "puredns"
+
+# Install massdns (required by puredns)
+install_massdns
+
+# ============================================================================
 # RECOMMENDED TOOLS (high priority)
 # ============================================================================
 
 header "INSTALLING RECOMMENDED TOOLS"
 
 install_go_tool "github.com/tomnomnom/assetfinder" "assetfinder"
-install_go_tool "github.com/projectdiscovery/dnsx/cmd/dnsx" "dnsx"
-install_go_tool "github.com/d3mondev/puredns/v2" "puredns"
 install_go_tool "github.com/lc/gau/v2/cmd/gau" "gau"
 install_go_tool "github.com/tomnomnom/waybackurls" "waybackurls"
 install_go_tool "github.com/hakluke/hakrawler" "hakrawler"
@@ -179,41 +267,54 @@ install_go_tool "github.com/tomnomnom/anew" "anew"
 # Uro (Python)
 install_python_tool "uro" "uro"
 
-# Findomain (direct download)
+# GetJS (JavaScript file discovery)
+install_go_tool "github.com/003random/getJS" "getJS"
+
+# Subzy (subdomain takeover detection)
+install_go_tool "github.com/PentestPad/subzy" "subzy"
+
+# Findomain (direct download or Homebrew)
 if ! command_exists findomain; then
     info "Installing findomain..."
 
-    ARCH=$(uname -m)
-    OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-
-    case "$ARCH" in
-        x86_64) ARCH="amd64" ;;
-        aarch64|arm64) ARCH="arm64" ;;
-    esac
-
-    FINDOMAIN_URL="https://github.com/Findomain/Findomain/releases/latest/download/findomain-${OS}-${ARCH}.zip"
-
-    TMP_DIR=$(mktemp -d)
-    cd "$TMP_DIR"
-
-    if wget -q "$FINDOMAIN_URL" 2>/dev/null || curl -sL "$FINDOMAIN_URL" -o "findomain-${OS}-${ARCH}.zip"; then
-        unzip -q "findomain-${OS}-${ARCH}.zip" 2>/dev/null
-        chmod +x findomain
-
-        # Try to install in /usr/local/bin, otherwise in $GOPATH/bin
-        if sudo mv findomain /usr/local/bin/ 2>/dev/null; then
-            success "findomain installed in /usr/local/bin/"
-        elif mv findomain "$GOPATH/bin/" 2>/dev/null; then
-            success "findomain installed in $GOPATH/bin/"
-        else
-            warning "Could not move findomain to PATH, manually copy from $TMP_DIR"
+    # Try Homebrew first on macOS
+    if [ "$OS" = "darwin" ] && command_exists brew; then
+        info "Trying to install via Homebrew..."
+        if brew install findomain 2>/dev/null; then
+            success "findomain installed via Homebrew"
         fi
     else
-        error "Failed to download findomain"
-    fi
+        # Download binary for Linux or if Homebrew fails
+        case "$ARCH" in
+            x86_64) FINDOMAIN_ARCH="amd64" ;;
+            aarch64|arm64) FINDOMAIN_ARCH="arm64" ;;
+            *) FINDOMAIN_ARCH="amd64" ;;
+        esac
 
-    cd - >/dev/null
-    rm -rf "$TMP_DIR"
+        FINDOMAIN_URL="https://github.com/Findomain/Findomain/releases/latest/download/findomain-${OS}-${FINDOMAIN_ARCH}.zip"
+
+        TMP_DIR=$(mktemp -d)
+        cd "$TMP_DIR"
+
+        if wget -q "$FINDOMAIN_URL" 2>/dev/null || curl -sL "$FINDOMAIN_URL" -o "findomain-${OS}-${FINDOMAIN_ARCH}.zip"; then
+            unzip -q "findomain-${OS}-${FINDOMAIN_ARCH}.zip" 2>/dev/null
+            chmod +x findomain
+
+            # Try to install in /usr/local/bin, otherwise in $GOPATH/bin
+            if sudo mv findomain /usr/local/bin/ 2>/dev/null; then
+                success "findomain installed in /usr/local/bin/"
+            elif mv findomain "$GOPATH/bin/" 2>/dev/null; then
+                success "findomain installed in $GOPATH/bin/"
+            else
+                warning "Could not move findomain to PATH, manually copy from $TMP_DIR"
+            fi
+        else
+            error "Failed to download findomain"
+        fi
+
+        cd - >/dev/null
+        rm -rf "$TMP_DIR"
+    fi
 else
     warning "findomain is already installed, skipping..."
 fi
@@ -235,14 +336,8 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
     # Gowitness
     install_go_tool "github.com/sensepost/gowitness" "gowitness"
 
-    # GetJS
-    install_go_tool "github.com/003random/getJS" "getJS"
-
     # Subjs
     install_go_tool "github.com/lc/subjs" "subjs"
-
-    # Subzy
-    install_go_tool "github.com/LukaSikic/subzy" "subzy"
 
     # Subjack
     install_go_tool "github.com/haccer/subjack" "subjack"
@@ -305,8 +400,9 @@ fi
 header "FINAL VERIFICATION"
 
 CRITICAL_TOOLS=("subfinder" "httpx")
-RECOMMENDED_TOOLS=("assetfinder" "findomain" "dnsx" "puredns" "gau" "waybackurls" "hakrawler" "anew" "uro")
-OPTIONAL_TOOLS=("amass" "gowitness" "getJS" "subjs" "subzy")
+DNS_TOOLS=("dnsx" "puredns" "massdns")
+RECOMMENDED_TOOLS=("assetfinder" "findomain" "gau" "waybackurls" "hakrawler" "anew" "uro" "getJS" "subzy")
+OPTIONAL_TOOLS=("amass" "gowitness" "subjs" "subjack")
 
 info "Verifying installation..."
 echo ""
@@ -317,6 +413,16 @@ for tool in "${CRITICAL_TOOLS[@]}"; do
         echo -e "  ${GREEN}✓${NC} $tool"
     else
         echo -e "  ${RED}✗${NC} $tool ${RED}(MISSING!)${NC}"
+    fi
+done
+
+echo ""
+echo "DNS Tools:"
+for tool in "${DNS_TOOLS[@]}"; do
+    if command_exists "$tool"; then
+        echo -e "  ${GREEN}✓${NC} $tool"
+    else
+        echo -e "  ${YELLOW}✗${NC} $tool ${YELLOW}(Recommended for DNS resolution)${NC}"
     fi
 done
 
@@ -343,6 +449,17 @@ done
 echo ""
 success "Installation completed!"
 echo ""
-warning "IMPORTANT: Run 'source $SHELL_CONFIG' or open a new terminal"
+warning "IMPORTANT: Execute 'source $SHELL_CONFIG' or open a new terminal"
 echo ""
-info "To test, run: ./webenum.py --check-tools"
+info "To test, run: python3 webenum.py --check-tools"
+echo ""
+
+# Show massdns warning if not installed
+if ! command_exists massdns; then
+    warning "massdns not installed - DNS resolution will be limited"
+    if [ "$OS" = "darwin" ]; then
+        info "Try: brew install massdns"
+    else
+        info "See installation instructions: python3 webenum.py --install-help"
+    fi
+fi

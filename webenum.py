@@ -11,6 +11,7 @@ import subprocess
 import argparse
 import logging
 import time
+import platform
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Optional, Set
@@ -61,7 +62,7 @@ class ToolChecker:
 
     REQUIRED_TOOLS = {
         'subdomain': ['subfinder', 'assetfinder', 'findomain'],
-        'dns': ['dnsx', 'puredns'],
+        'dns': ['dnsx', 'puredns', 'massdns'],
         'http': ['httpx'],
         'url_collect': ['gau', 'waybackurls', 'hakrawler', 'getJS'],
         'utils': ['anew', 'uro'],
@@ -90,6 +91,20 @@ class ToolChecker:
                     missing.append(tool)
 
         return {'available': available, 'missing': missing}
+
+    @staticmethod
+    def get_gowitness_version() -> Optional[str]:
+        """Get gowitness version to determine correct command syntax"""
+        try:
+            result = subprocess.run(
+                ['gowitness', 'version'],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            return result.stdout.strip()
+        except:
+            return None
 
 
 class OutputManager:
@@ -228,6 +243,12 @@ class DNSResolver:
             Logger.warning("puredns not found, skipping resolution...")
             return input_file
 
+        # Check for massdns dependency
+        if not ToolChecker.check_tool('massdns'):
+            Logger.warning("massdns not found (required by puredns)")
+            Logger.info("Install: brew install massdns  OR  git clone https://github.com/blechschmidt/massdns && make")
+            return input_file
+
         Logger.header("DNS RESOLUTION")
         Logger.info("Resolving subdomains with puredns...")
 
@@ -247,6 +268,10 @@ class DNSResolver:
             Logger.success(f"Resolved: {count} subdomains")
             return output_file
 
+        except subprocess.CalledProcessError as e:
+            Logger.error(f"puredns failed: {e}")
+            Logger.warning("Using unresolved subdomain list instead")
+            return input_file
         except subprocess.TimeoutExpired:
             Logger.warning("puredns timeout, using original list")
             return input_file
@@ -352,14 +377,43 @@ class HTTPProber:
 
         screenshot_dir = self.output_mgr.dirs['screenshots']
 
-        try:
-            subprocess.run(
-                ['gowitness', 'file', '-f', str(input_file), '-P', str(screenshot_dir)],
-                timeout=600
-            )
-            Logger.success(f"Screenshots saved to {screenshot_dir}")
-        except Exception as e:
-            Logger.warning(f"Error in gowitness: {e}")
+        # Try to determine correct command syntax
+        # Newer versions use: gowitness scan file -f <file>
+        # Older versions use: gowitness file -f <file>
+        
+        commands_to_try = [
+            # New syntax (v3.x)
+            ['gowitness', 'scan', 'file', '-f', str(input_file), '-P', str(screenshot_dir), '--disable-db'],
+            # Alternative new syntax
+            ['gowitness', 'scan', 'file', '-f', str(input_file), '--screenshot-path', str(screenshot_dir)],
+            # Old syntax (v2.x)
+            ['gowitness', 'file', '-f', str(input_file), '-P', str(screenshot_dir)],
+        ]
+
+        success = False
+        for cmd in commands_to_try:
+            try:
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=600
+                )
+                
+                if result.returncode == 0:
+                    Logger.success(f"Screenshots saved to {screenshot_dir}")
+                    success = True
+                    break
+                    
+            except subprocess.TimeoutExpired:
+                Logger.warning("gowitness timeout")
+                break
+            except Exception:
+                continue
+
+        if not success:
+            Logger.warning("Could not capture screenshots - gowitness command syntax may have changed")
+            Logger.info("Try manually: gowitness scan file -f alive.txt --screenshot-path ./screenshots")
 
 
 class URLCollector:
@@ -378,13 +432,14 @@ class URLCollector:
         if ToolChecker.check_tool('gau'):
             Logger.info("Collecting URLs with gau...")
             try:
-                result = subprocess.run(
-                    ['gau', '--subs', '--threads', '5'],
-                    stdin=open(hosts_file, 'r'),
-                    capture_output=True,
-                    text=True,
-                    timeout=600
-                )
+                with open(hosts_file, 'r') as f:
+                    result = subprocess.run(
+                        ['gau', '--subs', '--threads', '5'],
+                        stdin=f,
+                        capture_output=True,
+                        text=True,
+                        timeout=600
+                    )
                 urls = set(line.strip() for line in result.stdout.split('\n') if line.strip())
                 all_urls.update(urls)
                 Logger.success(f"gau: {len(urls)} URLs")
@@ -395,13 +450,14 @@ class URLCollector:
         if ToolChecker.check_tool('waybackurls'):
             Logger.info("Collecting URLs with waybackurls...")
             try:
-                result = subprocess.run(
-                    ['waybackurls'],
-                    stdin=open(hosts_file, 'r'),
-                    capture_output=True,
-                    text=True,
-                    timeout=600
-                )
+                with open(hosts_file, 'r') as f:
+                    result = subprocess.run(
+                        ['waybackurls'],
+                        stdin=f,
+                        capture_output=True,
+                        text=True,
+                        timeout=600
+                    )
                 urls = set(line.strip() for line in result.stdout.split('\n') if line.strip())
                 all_urls.update(urls)
                 Logger.success(f"waybackurls: {len(urls)} URLs")
@@ -423,13 +479,14 @@ class URLCollector:
         if ToolChecker.check_tool('hakrawler'):
             Logger.info("Crawling with hakrawler...")
             try:
-                result = subprocess.run(
-                    ['hakrawler', '-plain', '-depth', '2'],
-                    stdin=open(hosts_file, 'r'),
-                    capture_output=True,
-                    text=True,
-                    timeout=900
-                )
+                with open(hosts_file, 'r') as f:
+                    result = subprocess.run(
+                        ['hakrawler', '-plain', '-depth', '2'],
+                        stdin=f,
+                        capture_output=True,
+                        text=True,
+                        timeout=900
+                    )
                 urls = set(line.strip() for line in result.stdout.split('\n') if line.strip())
                 all_urls.update(urls)
                 Logger.success(f"hakrawler: {len(urls)} URLs")
@@ -476,13 +533,14 @@ class URLCollector:
         Logger.info("Extracting endpoints from JS files...")
 
         try:
-            result = subprocess.run(
-                ['subjs'],
-                stdin=open(js_file, 'r'),
-                capture_output=True,
-                text=True,
-                timeout=600
-            )
+            with open(js_file, 'r') as f:
+                result = subprocess.run(
+                    ['subjs'],
+                    stdin=f,
+                    capture_output=True,
+                    text=True,
+                    timeout=600
+                )
 
             urls = set(line.strip() for line in result.stdout.split('\n') if line.strip())
             Logger.success(f"Endpoints extracted from JS: {len(urls)}")
@@ -511,13 +569,14 @@ class URLCollector:
         clean_file = self.output_mgr.get_path('urls', 'urls_clean.txt')
 
         try:
-            result = subprocess.run(
-                ['uro'],
-                stdin=open(temp_file, 'r'),
-                capture_output=True,
-                text=True,
-                timeout=300
-            )
+            with open(temp_file, 'r') as f:
+                result = subprocess.run(
+                    ['uro'],
+                    stdin=f,
+                    capture_output=True,
+                    text=True,
+                    timeout=300
+                )
 
             with open(clean_file, 'w') as f:
                 f.write(result.stdout)
@@ -533,7 +592,8 @@ class URLCollector:
 
         except Exception as e:
             Logger.error(f"Error in uro: {e}")
-            temp_file.rename(clean_file)
+            if temp_file.exists():
+                temp_file.rename(clean_file)
             return clean_file
 
 
@@ -549,7 +609,6 @@ class TakeoverChecker:
             Logger.warning("subzy not found, skipping takeover check...")
             return
 
-        Logger.header("TAKEOVER CHECK")
         Logger.info("Checking takeover with subzy...")
 
         output_file = self.output_mgr.get_path('takeover', 'subzy_results.txt')
@@ -611,6 +670,8 @@ class WebEnum:
         # 4. Screenshots (optional)
         if not skip_screenshots:
             self.http_prober.screenshot_with_gowitness(alive_file)
+        else:
+            Logger.info("Skipping screenshots (--skip-screenshots)")
 
         # 5. URL Collection
         all_urls = set()
@@ -665,6 +726,51 @@ class WebEnum:
         Logger.success(f"Results saved to: {self.output_mgr.base_dir}")
 
 
+def print_installation_help():
+    """Print helpful installation instructions"""
+    system = platform.system()
+    
+    Logger.header("INSTALLATION HELP")
+    
+    if system == "Darwin":  # macOS
+        print("""
+macOS Installation:
+
+1. Install Homebrew (if not installed):
+   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+2. Install dependencies:
+   brew install go python3 massdns
+
+3. Run the installation script:
+   ./install_tools.sh
+
+4. Manual massdns installation (if brew fails):
+   git clone https://github.com/blechschmidt/massdns
+   cd massdns && make
+   sudo make install
+""")
+    else:  # Linux
+        print("""
+Linux Installation:
+
+1. Install dependencies:
+   # Ubuntu/Debian
+   sudo apt update && sudo apt install -y golang-go python3 python3-pip git build-essential
+
+   # Fedora
+   sudo dnf install -y golang python3 python3-pip git gcc make
+
+2. Install massdns:
+   git clone https://github.com/blechschmidt/massdns
+   cd massdns && make
+   sudo make install
+
+3. Run the installation script:
+   ./install_tools.sh
+""")
+
+
 def main():
     banner = f"""
 {Colors.OKCYAN}{Colors.BOLD}
@@ -685,7 +791,6 @@ def main():
 
     parser.add_argument(
         '-d', '--domain',
-        required=True,
         help='Target domain (e.g.: example.com)'
     )
 
@@ -707,7 +812,18 @@ def main():
         help='Check installed tools and exit'
     )
 
+    parser.add_argument(
+        '--install-help',
+        action='store_true',
+        help='Show installation instructions'
+    )
+
     args = parser.parse_args()
+
+    # Show installation help
+    if args.install_help:
+        print_installation_help()
+        sys.exit(0)
 
     # Check tools
     if args.check_tools:
@@ -722,8 +838,17 @@ def main():
             Logger.warning("\nMissing:")
             for tool in status['missing']:
                 print(f"  ✗ {tool}")
+            
+            print("\n" + "="*60)
+            Logger.info("To install missing tools, run: ./install_tools.sh")
+            Logger.info("For detailed instructions, run: ./webenum.py --install-help")
 
         sys.exit(0)
+
+    # Require domain if not checking tools
+    if not args.domain:
+        parser.print_help()
+        sys.exit(1)
 
     # Check critical tools
     critical_tools = ['subfinder', 'httpx']
@@ -731,8 +856,14 @@ def main():
 
     if missing_critical:
         Logger.error(f"Missing critical tools: {', '.join(missing_critical)}")
-        Logger.info("Install with: go install -v github.com/projectdiscovery/<tool>/cmd/<tool>@latest")
+        Logger.info("Run: ./install_tools.sh")
+        Logger.info("Or: ./webenum.py --install-help")
         sys.exit(1)
+
+    # Warn about massdns
+    if not ToolChecker.check_tool('massdns'):
+        Logger.warning("massdns not found - DNS resolution will be limited")
+        Logger.info(f"Install on {'macOS: brew install massdns' if platform.system() == 'Darwin' else 'Linux: see --install-help'}")
 
     # Start enumeration
     try:
