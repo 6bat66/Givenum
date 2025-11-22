@@ -1,118 +1,466 @@
 #!/bin/bash
 
 # ============================================================================
-# WebEnum Batch Processor
-# Processa múltiplos domínios de uma lista
+# WebEnum Enhanced Batch Processor
+# Process multiple domains with enhanced features
 # ============================================================================
 
 set -e
 
-# Cores
+# Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m'
 
 info() { echo -e "${BLUE}[*]${NC} $1"; }
 success() { echo -e "${GREEN}[+]${NC} $1"; }
 warning() { echo -e "${YELLOW}[!]${NC} $1"; }
 error() { echo -e "${RED}[-]${NC} $1"; }
+header() { echo -e "\n${CYAN}========================================${NC}"; echo -e "${CYAN}$1${NC}"; echo -e "${CYAN}========================================${NC}\n"; }
 
-# Verifica argumentos
+# Default settings
+WEBENUM_SCRIPT="./webenum_enhanced.py"
+LOG_DIR="./batch_logs"
+RESULTS_SUMMARY="${LOG_DIR}/batch_summary.txt"
+FAILED_DOMAINS="${LOG_DIR}/failed_domains.txt"
+
+# Parse arguments
+usage() {
+    cat << EOF
+Usage: $0 <domains_file> [options]
+
+Arguments:
+    domains_file        File containing one domain per line
+
+Options:
+    --skip-screenshots  Skip screenshot capture
+    --skip-portscan     Skip port scanning
+    --skip-vuln-scan    Skip vulnerability scanning
+    --enable-fuzzing    Enable directory fuzzing
+    -o, --output DIR    Output directory (default: ./results)
+    --parallel N        Process N domains in parallel (default: 1)
+    --delay SECONDS     Delay between scans (default: 0)
+    --continue-on-error Continue even if a scan fails
+    --notify WEBHOOK    Slack webhook URL for notifications
+    -h, --help          Show this help message
+
+Examples:
+    $0 domains.txt
+    $0 domains.txt --skip-screenshots --parallel 3
+    $0 targets.txt --enable-fuzzing --notify https://hooks.slack.com/...
+    $0 list.txt -o /data/results --delay 60
+
+Domain File Format:
+    # Comment lines start with #
+    example.com
+    target.com
+    test.domain.org
+    
+EOF
+    exit 0
+}
+
+# Parse command line arguments
 if [ $# -lt 1 ]; then
-    echo "Uso: $0 <arquivo_com_dominios> [opcoes_webenum]"
-    echo ""
-    echo "Exemplo:"
-    echo "  $0 targets.txt --skip-screenshots"
-    echo "  $0 domains.txt -o /caminho/output"
-    echo ""
-    exit 1
+    usage
 fi
 
 DOMAINS_FILE="$1"
-shift  # Remove primeiro argumento
-EXTRA_ARGS="$@"
+shift
 
-# Verifica se arquivo existe
+# Check if domains file exists
 if [ ! -f "$DOMAINS_FILE" ]; then
-    error "Arquivo não encontrado: $DOMAINS_FILE"
+    error "Domains file not found: $DOMAINS_FILE"
     exit 1
 fi
 
-# Verifica se webenum.py existe
-if [ ! -f "./webenum.py" ]; then
-    error "webenum.py não encontrado no diretório atual"
-    exit 1
+# Parse options
+OUTPUT_DIR="./results"
+EXTRA_ARGS=""
+PARALLEL_JOBS=1
+DELAY=0
+CONTINUE_ON_ERROR=false
+SLACK_WEBHOOK=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --skip-screenshots)
+            EXTRA_ARGS="$EXTRA_ARGS --skip-screenshots"
+            shift
+            ;;
+        --skip-portscan)
+            EXTRA_ARGS="$EXTRA_ARGS --skip-portscan"
+            shift
+            ;;
+        --skip-vuln-scan)
+            EXTRA_ARGS="$EXTRA_ARGS --skip-vuln-scan"
+            shift
+            ;;
+        --enable-fuzzing)
+            EXTRA_ARGS="$EXTRA_ARGS --enable-fuzzing"
+            shift
+            ;;
+        -o|--output)
+            OUTPUT_DIR="$2"
+            EXTRA_ARGS="$EXTRA_ARGS -o $2"
+            shift 2
+            ;;
+        --parallel)
+            PARALLEL_JOBS="$2"
+            shift 2
+            ;;
+        --delay)
+            DELAY="$2"
+            shift 2
+            ;;
+        --continue-on-error)
+            CONTINUE_ON_ERROR=true
+            shift
+            ;;
+        --notify)
+            SLACK_WEBHOOK="$2"
+            shift 2
+            ;;
+        -h|--help)
+            usage
+            ;;
+        *)
+            warning "Unknown option: $1"
+            shift
+            ;;
+    esac
+done
+
+# Verify webenum script exists
+if [ ! -f "$WEBENUM_SCRIPT" ]; then
+    error "WebEnum script not found: $WEBENUM_SCRIPT"
+    info "Looking for webenum.py as fallback..."
+    
+    if [ -f "./webenum.py" ]; then
+        WEBENUM_SCRIPT="./webenum.py"
+        warning "Using original webenum.py (some features may not be available)"
+    else
+        error "No WebEnum script found!"
+        exit 1
+    fi
 fi
 
-# Conta domínios
+# Create log directory
+mkdir -p "$LOG_DIR"
+
+# Count domains
 TOTAL=$(grep -v '^#' "$DOMAINS_FILE" | grep -v '^[[:space:]]*$' | wc -l)
 
 if [ $TOTAL -eq 0 ]; then
-    error "Nenhum domínio encontrado em $DOMAINS_FILE"
+    error "No domains found in $DOMAINS_FILE"
     exit 1
 fi
 
-info "Encontrados $TOTAL domínios para processar"
-info "Argumentos extras: ${EXTRA_ARGS:-nenhum}"
+# Send Slack notification
+send_slack() {
+    local message="$1"
+    local color="${2:-good}"
+    
+    if [ -n "$SLACK_WEBHOOK" ]; then
+        curl -X POST -H 'Content-type: application/json' \
+            --data "{\"attachments\":[{\"color\":\"${color}\",\"text\":\"${message}\"}]}" \
+            "$SLACK_WEBHOOK" 2>/dev/null || true
+    fi
+}
+
+# Display configuration
+header "BATCH ENUMERATION CONFIGURATION"
+info "Domains file: $DOMAINS_FILE"
+info "Total domains: $TOTAL"
+info "Parallel jobs: $PARALLEL_JOBS"
+info "Delay between scans: ${DELAY}s"
+info "Output directory: $OUTPUT_DIR"
+info "Extra arguments: ${EXTRA_ARGS:-none}"
+info "Continue on error: $CONTINUE_ON_ERROR"
+[ -n "$SLACK_WEBHOOK" ] && info "Slack notifications: enabled"
 echo ""
 
-# Confirma
-read -p "$(echo -e ${YELLOW}Iniciar processamento? [y/N]: ${NC})" -n 1 -r
+# Confirm
+read -p "$(echo -e ${YELLOW}Start batch processing? [y/N]: ${NC})" -n 1 -r
 echo
 if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    warning "Cancelado pelo usuário"
+    warning "Cancelled by user"
     exit 0
 fi
 
-# Processa cada domínio
+# Initialize counters
 COUNTER=0
 SUCCESS=0
 FAILED=0
+SKIPPED=0
+START_TIME=$(date +%s)
 
-while IFS= read -r domain; do
-    # Pula linhas vazias e comentários
-    [[ "$domain" =~ ^[[:space:]]*$ ]] && continue
-    [[ "$domain" =~ ^# ]] && continue
+# Clear previous failed domains list
+> "$FAILED_DOMAINS"
 
-    COUNTER=$((COUNTER + 1))
-
+# Process function
+process_domain() {
+    local domain="$1"
+    local job_num="$2"
+    local log_file="${LOG_DIR}/${domain}.log"
+    
     echo ""
-    echo -e "${BLUE}================================================${NC}"
-    echo -e "${BLUE}Processando [$COUNTER/$TOTAL]: $domain${NC}"
-    echo -e "${BLUE}================================================${NC}"
-
-    # Executa webenum
-    if ./webenum.py -d "$domain" $EXTRA_ARGS; then
-        SUCCESS=$((SUCCESS + 1))
-        success "Domínio $domain concluído com sucesso"
-    else
-        FAILED=$((FAILED + 1))
-        error "Falha ao processar $domain"
-
-        # Pergunta se quer continuar
-        read -p "$(echo -e ${YELLOW}Continuar com próximo domínio? [Y/n]: ${NC})" -n 1 -r
+    header "[$job_num/$TOTAL] Processing: $domain"
+    
+    # Check if already processed
+    if [ -d "${OUTPUT_DIR}/${domain}_"* ] 2>/dev/null; then
+        local existing=$(ls -dt "${OUTPUT_DIR}/${domain}_"* 2>/dev/null | head -1)
+        warning "Previous scan found: $existing"
+        read -p "$(echo -e ${YELLOW}Skip this domain? [Y/n]: ${NC})" -n 1 -r
         echo
-        if [[ $REPLY =~ ^[Nn]$ ]]; then
-            warning "Processamento interrompido pelo usuário"
-            break
+        if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+            info "Skipping $domain"
+            return 2
         fi
     fi
+    
+    # Run scan
+    info "Starting scan for $domain..."
+    info "Log file: $log_file"
+    
+    if python3 "$WEBENUM_SCRIPT" -d "$domain" $EXTRA_ARGS > "$log_file" 2>&1; then
+        success "✓ $domain completed successfully"
+        send_slack "✅ Scan completed: $domain" "good"
+        return 0
+    else
+        error "✗ $domain failed!"
+        echo "$domain" >> "$FAILED_DOMAINS"
+        send_slack "❌ Scan failed: $domain" "danger"
+        
+        # Show last 5 lines of log
+        warning "Last 5 lines of log:"
+        tail -5 "$log_file" | sed 's/^/    /'
+        
+        return 1
+    fi
+}
 
-done < "$DOMAINS_FILE"
+# Process domains
+export -f process_domain
+export -f info
+export -f success
+export -f error
+export -f warning
+export -f send_slack
+export WEBENUM_SCRIPT EXTRA_ARGS OUTPUT_DIR LOG_DIR SLACK_WEBHOOK BLUE GREEN RED YELLOW NC
 
-# Sumário final
-echo ""
-echo -e "${BLUE}================================================${NC}"
-echo -e "${BLUE}SUMÁRIO FINAL${NC}"
-echo -e "${BLUE}================================================${NC}"
-echo -e "${GREEN}Sucessos:${NC} $SUCCESS"
-echo -e "${RED}Falhas:${NC}   $FAILED"
-echo -e "${BLUE}Total:${NC}    $COUNTER"
-echo ""
+# Read domains into array
+mapfile -t DOMAINS < <(grep -v '^#' "$DOMAINS_FILE" | grep -v '^[[:space:]]*$')
 
-if [ $SUCCESS -gt 0 ]; then
-    success "Processamento concluído!"
-    info "Analise os resultados em: ./results/"
+# Process with parallel jobs
+if [ "$PARALLEL_JOBS" -gt 1 ]; then
+    info "Processing $PARALLEL_JOBS domains in parallel..."
+    
+    for domain in "${DOMAINS[@]}"; do
+        COUNTER=$((COUNTER + 1))
+        
+        # Wait if max parallel jobs reached
+        while [ $(jobs -r | wc -l) -ge "$PARALLEL_JOBS" ]; do
+            sleep 1
+        done
+        
+        # Process in background
+        (
+            if process_domain "$domain" "$COUNTER"; then
+                echo "SUCCESS:$domain" >> "${LOG_DIR}/status.tmp"
+            elif [ $? -eq 2 ]; then
+                echo "SKIPPED:$domain" >> "${LOG_DIR}/status.tmp"
+            else
+                echo "FAILED:$domain" >> "${LOG_DIR}/status.tmp"
+            fi
+        ) &
+        
+        # Delay between launches
+        [ "$DELAY" -gt 0 ] && sleep "$DELAY"
+    done
+    
+    # Wait for all jobs to complete
+    wait
+    
+    # Count results
+    if [ -f "${LOG_DIR}/status.tmp" ]; then
+        SUCCESS=$(grep -c "^SUCCESS:" "${LOG_DIR}/status.tmp" || true)
+        FAILED=$(grep -c "^FAILED:" "${LOG_DIR}/status.tmp" || true)
+        SKIPPED=$(grep -c "^SKIPPED:" "${LOG_DIR}/status.tmp" || true)
+        rm "${LOG_DIR}/status.tmp"
+    fi
+    
+else
+    # Sequential processing
+    for domain in "${DOMAINS[@]}"; do
+        COUNTER=$((COUNTER + 1))
+        
+        if process_domain "$domain" "$COUNTER"; then
+            SUCCESS=$((SUCCESS + 1))
+        elif [ $? -eq 2 ]; then
+            SKIPPED=$((SKIPPED + 1))
+        else
+            FAILED=$((FAILED + 1))
+            
+            if [ "$CONTINUE_ON_ERROR" = false ]; then
+                read -p "$(echo -e ${YELLOW}Continue with next domain? [Y/n]: ${NC})" -n 1 -r
+                echo
+                if [[ $REPLY =~ ^[Nn]$ ]]; then
+                    warning "Processing stopped by user"
+                    break
+                fi
+            fi
+        fi
+        
+        # Delay between scans
+        if [ "$DELAY" -gt 0 ] && [ "$COUNTER" -lt "$TOTAL" ]; then
+            info "Waiting ${DELAY}s before next scan..."
+            sleep "$DELAY"
+        fi
+    done
 fi
+
+# Calculate time
+END_TIME=$(date +%s)
+ELAPSED=$((END_TIME - START_TIME))
+HOURS=$((ELAPSED / 3600))
+MINUTES=$(((ELAPSED % 3600) / 60))
+SECONDS=$((ELAPSED % 60))
+
+# Generate summary
+header "BATCH PROCESSING SUMMARY"
+
+cat > "$RESULTS_SUMMARY" << EOF
+Batch Enumeration Summary
+Generated: $(date)
+================================================================================
+
+Configuration:
+- Domains file: $DOMAINS_FILE
+- Total domains: $TOTAL
+- Parallel jobs: $PARALLEL_JOBS
+- Output directory: $OUTPUT_DIR
+
+Results:
+- Successful: $SUCCESS
+- Failed: $FAILED
+- Skipped: $SKIPPED
+- Total processed: $COUNTER
+
+Time:
+- Total time: ${HOURS}h ${MINUTES}m ${SECONDS}s
+- Average per domain: $((ELAPSED / COUNTER))s
+
+Failed Domains:
+EOF
+
+if [ $FAILED -gt 0 ]; then
+    cat "$FAILED_DOMAINS" >> "$RESULTS_SUMMARY"
+else
+    echo "None" >> "$RESULTS_SUMMARY"
+fi
+
+# Display summary
+cat "$RESULTS_SUMMARY"
+
+# Summary stats
+echo ""
+success "Successful: $SUCCESS"
+if [ $FAILED -gt 0 ]; then
+    error "Failed: $FAILED (see $FAILED_DOMAINS)"
+fi
+if [ $SKIPPED -gt 0 ]; then
+    warning "Skipped: $SKIPPED"
+fi
+info "Total processed: $COUNTER"
+info "Time elapsed: ${HOURS}h ${MINUTES}m ${SECONDS}s"
+
+# Final Slack notification
+if [ -n "$SLACK_WEBHOOK" ]; then
+    SUMMARY_MSG="📊 Batch scan complete!\n✅ Success: $SUCCESS\n❌ Failed: $FAILED\n⏭️ Skipped: $SKIPPED\n⏱️ Time: ${HOURS}h ${MINUTES}m"
+    send_slack "$SUMMARY_MSG" "good"
+fi
+
+echo ""
+info "Results directory: $OUTPUT_DIR"
+info "Summary saved to: $RESULTS_SUMMARY"
+info "Logs saved to: $LOG_DIR"
+
+# Generate combined report
+if [ $SUCCESS -gt 0 ]; then
+    echo ""
+    read -p "$(echo -e ${YELLOW}Generate combined analysis report? [y/N]: ${NC})" -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        info "Generating combined report..."
+        
+        COMBINED_REPORT="${LOG_DIR}/combined_report.md"
+        
+        cat > "$COMBINED_REPORT" << EOF
+# Combined Batch Enumeration Report
+
+**Date**: $(date)
+**Domains Processed**: $SUCCESS successful
+
+---
+
+## Summary Statistics
+
+| Metric | Count |
+|--------|-------|
+| Total Domains | $TOTAL |
+| Successful | $SUCCESS |
+| Failed | $FAILED |
+| Skipped | $SKIPPED |
+
+---
+
+## Individual Domain Results
+
+EOF
+        
+        # Add results from each domain
+        for result_dir in "${OUTPUT_DIR}/"*_*; do
+            if [ -d "$result_dir" ]; then
+                domain=$(basename "$result_dir" | sed 's/_[0-9]*$//')
+                report_file="${result_dir}/reports/report.md"
+                
+                if [ -f "$report_file" ]; then
+                    echo "### $domain" >> "$COMBINED_REPORT"
+                    echo "" >> "$COMBINED_REPORT"
+                    tail -n +2 "$report_file" >> "$COMBINED_REPORT"
+                    echo "" >> "$COMBINED_REPORT"
+                    echo "---" >> "$COMBINED_REPORT"
+                    echo "" >> "$COMBINED_REPORT"
+                fi
+            fi
+        done
+        
+        success "Combined report saved to: $COMBINED_REPORT"
+    fi
+fi
+
+# Cleanup old logs
+if [ $(ls -1 "$LOG_DIR"/*.log 2>/dev/null | wc -l) -gt 50 ]; then
+    warning "Log directory has many files. Consider cleanup."
+    read -p "$(echo -e ${YELLOW}Archive old logs? [y/N]: ${NC})" -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        tar -czf "${LOG_DIR}_$(date +%Y%m%d).tar.gz" "$LOG_DIR"/*.log
+        rm "$LOG_DIR"/*.log
+        success "Logs archived"
+    fi
+fi
+
+echo ""
+if [ $SUCCESS -gt 0 ]; then
+    success "✅ Batch processing completed successfully!"
+else
+    error "❌ No successful scans!"
+    exit 1
+fi
+
+exit 0
