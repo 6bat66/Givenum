@@ -1,642 +1,525 @@
-# Migration Guide: WebEnum → WebEnum Enhanced
+# WebEnum
 
-## 🚀 Overview
+**Advanced Web Enumeration Framework**
 
-This guide helps you transition from the original WebEnum to WebEnum Enhanced. The enhanced version maintains **full backward compatibility** while adding powerful new features.
+Comprehensive reconnaissance tool for web application security testing, bug bounty hunting, and penetration testing.
 
----
+## Features
 
-## ✅ Quick Migration Checklist
+### Subdomain Discovery
+- **Active Tools**: subfinder, assetfinder, findomain, amass, chaos
+- **Passive Sources**: Certificate Transparency logs (crt.sh)
+- **API Integration**: VirusTotal, SecurityTrails
+- **JS Analysis**: Subdomain extraction from JavaScript files
 
-- [ ] Install new tools (5 minutes)
-- [ ] Configure API keys (optional, 2 minutes)
-- [ ] Update scripts/aliases (1 minute)
-- [ ] Test with a single domain (5 minutes)
-- [ ] Review new output structure (2 minutes)
+### HTTP Analysis
+- **Modern Probing**: httpx with full feature detection
+- **Security Headers**: Automatic analysis of missing security headers
+- **Favicon Intelligence**: Hash-based technology identification
+- **Technology Detection**: webanalyze, retire.js integration
+- **Screenshots**: gowitness for visual reconnaissance
 
-**Total time: ~15 minutes**
+### Port Scanning
+- **Fast Scanning**: sdlookup using Shodan's internetdb (no slow nmap scans)
+- **Service Detection**: Quick identification of open ports and services
 
----
+### URL Discovery
+- **Modern Crawlers**: xurlfind3r, katana for comprehensive coverage
+- **Web Archives**: gau, waybackurls for historical data
+- **Live Crawling**: gospider for real-time discovery
+- **Smart Filtering**: uro for URL deduplication
 
-## 📦 Side-by-Side Installation
+### JavaScript Analysis
+- **Subdomain Extraction**: jsubfinder for finding subdomains in JS
+- **URL Extraction**: getallurls for comprehensive endpoint discovery
+- **Secret Scanning**: trufflehog for finding leaked credentials
+- **JS Collection**: subjs for gathering all JavaScript files
 
-You can run both versions simultaneously:
+### Git Repository Analysis
+- **Exposure Detection**: Automatic .git directory discovery
+- **Repository Dumping**: goop for extracting exposed repositories
+- **Secret Scanning**: trufflehog for finding secrets in git history
 
+### Vulnerability Scanning
+- **Template-Based**: Nuclei with 3000+ templates
+- **Jaeles**: Additional vulnerability checks
+- **nikto**: Web server scanner
+
+### Parameter Discovery
+- **Hidden Parameters**: Arjun, x8 for finding undocumented parameters
+- **Analysis**: Automatic detection of interesting parameters
+- **Fuzzing**: Parameter-based attack surface identification
+
+### Directory Fuzzing
+- **Modern Fuzzers**: feroxbuster, ffuf, gobuster
+- **Smart Wordlists**: Configurable wordlist support
+- **Fast Scanning**: Optimized for speed and accuracy
+
+### Additional Features
+- **Diff Tracking**: Compare scans to identify changes over time
+- **Report Generation**: Professional Markdown reports
+- **Cross-Platform**: Works on macOS and Debian/Kali
+- **API Management**: Secure API key storage and management
+
+## Installation
+
+### Prerequisites
+
+**Required:**
+- Go 1.20+
+- Python 3.8+
+- git, wget, curl
+
+**macOS:**
 ```bash
-# Keep original
-mv webenum.py webenum_original.py
-
-# Add enhanced version
-wget https://raw.githubusercontent.com/yourrepo/webenum_enhanced.py
-
-# Use either
-python3 webenum_original.py -d example.com  # Original
-python3 webenum_enhanced.py -d example.com  # Enhanced
+brew install go python3 git wget curl
 ```
 
----
-
-## 🔧 Installing New Tools
-
-### Option 1: Automated (Recommended)
-
+**Debian/Kali:**
 ```bash
-chmod +x install_tools_enhanced.sh
-./install_tools_enhanced.sh
+sudo apt update
+sudo apt install golang-go python3 python3-pip git wget curl build-essential
 ```
 
-### Option 2: Install Only New Tools
-
-If you already have the core tools, install only the new ones:
+### Quick Install
 
 ```bash
+# Clone repository
+git clone https://github.com/yourusername/webenum
+cd webenum
+
+# Make executable
+chmod +x install_tools.sh
+
+# Install all tools
+./install_tools.sh
+
+# Reload shell configuration
+source ~/.bashrc  # or ~/.zshrc
+```
+
+### Manual Tool Installation
+
+If you prefer to install specific tools:
+
+```bash
+# Core subdomain tools
+go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+go install github.com/tomnomnom/assetfinder@latest
+
+# HTTP probing
+go install github.com/projectdiscovery/httpx/cmd/httpx@latest
+
+# DNS resolution
+go install github.com/projectdiscovery/dnsx/cmd/dnsx@latest
+go install github.com/d3mondev/puredns/v2@latest
+
+# Port scanning (sdlookup instead of nmap)
+go install github.com/j3ssie/sdlookup@latest
+
+# Modern URL collection
+go install github.com/hueristiq/xurlfind3r/cmd/xurlfind3r@latest
+go install github.com/projectdiscovery/katana/cmd/katana@latest
+
 # Vulnerability scanning
 go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
 nuclei -update-templates
 
-# Port scanning
-sudo apt install nmap  # Linux
-brew install nmap      # macOS
-
-# Fuzzing
-go install github.com/ffuf/ffuf@latest
-
-# Parameter discovery
-pip3 install arjun
-
-# Optional
-go install github.com/hahwul/dalfox/v2@latest
+# Utilities
+go install github.com/tomnomnom/anew@latest
+pip3 install uro
 ```
 
----
+## Configuration
 
-## 📊 Command Comparison
+### API Keys (Optional but Recommended)
 
-### Original Commands Still Work
+Configure API keys for enhanced subdomain discovery:
 
 ```bash
-# These work exactly the same:
-python3 webenum_enhanced.py -d example.com
-python3 webenum_enhanced.py -d example.com --skip-screenshots
-python3 webenum_enhanced.py -d example.com -o /path/to/output
+python3 webenum.py --configure-api
 ```
 
-### New Command Options
+**Supported APIs:**
+- **VirusTotal**: https://www.virustotal.com/gui/join-us
+- **SecurityTrails**: https://securitytrails.com/
+- **Shodan**: https://www.shodan.io/
+
+API keys are stored securely in `~/.config/webenum/api_keys.json`
+
+### Tool Verification
+
+Check which tools are installed:
 
 ```bash
-# New features (all optional):
---skip-portscan       # Skip Nmap port scanning
---skip-vuln-scan      # Skip Nuclei vulnerability scanning
---enable-fuzzing      # Enable directory fuzzing
---configure-api       # Set up API keys
+python3 webenum.py --check-tools
 ```
 
-### Example Equivalents
+## Usage
 
-| Original | Enhanced (Same Result) | Enhanced (With New Features) |
-|----------|----------------------|---------------------------|
-| `python3 webenum.py -d target.com` | `python3 webenum_enhanced.py -d target.com --skip-portscan --skip-vuln-scan` | `python3 webenum_enhanced.py -d target.com` |
-| `python3 webenum.py -d target.com --skip-screenshots` | `python3 webenum_enhanced.py -d target.com --skip-screenshots --skip-portscan --skip-vuln-scan` | `python3 webenum_enhanced.py -d target.com --skip-screenshots` |
+### Basic Scan
 
----
+```bash
+python3 webenum.py -d example.com
+```
 
-## 📁 Output Structure Comparison
+### Custom Output Directory
 
-### Original Structure
+```bash
+python3 webenum.py -d example.com -o /path/to/output
+```
+
+### Skip Optional Steps
+
+```bash
+# Skip screenshots (faster)
+python3 webenum.py -d example.com --skip-screenshots
+
+# Skip port scanning
+python3 webenum.py -d example.com --skip-portscan
+
+# Skip vulnerability scanning
+python3 webenum.py -d example.com --skip-vuln
+
+# Combine multiple skips
+python3 webenum.py -d example.com --skip-screenshots --skip-portscan --skip-vuln
+```
+
+### Enable Fuzzing
+
+```bash
+python3 webenum.py -d example.com --enable-fuzzing
+```
+
+### Full Options
+
+```bash
+python3 webenum.py -h
+```
+
+## Output Structure
+
 ```
 results/example.com_20250122_123456/
 ├── subdomains/
+│   ├── all_subdomains.txt    # Consolidated subdomains
+│   ├── subfinder.txt
+│   ├── assetfinder.txt
+│   ├── amass.txt
+│   ├── crtsh.txt
+│   └── from_js.txt           # Subdomains found in JS
 ├── dns/
+│   ├── resolved.txt          # Active subdomains
+│   ├── a_records.txt
+│   └── cname_records.txt
 ├── http/
+│   ├── alive.txt             # Active HTTP services
+│   ├── httpx.json            # Detailed HTTP data
+│   └── security_headers.json # Security header analysis
+├── ports/
+│   ├── sdlookup.json         # Port scan results
+│   └── summary.txt           # Port summary
 ├── urls/
+│   ├── all_urls_raw.txt      # All discovered URLs
+│   ├── all_urls_clean.txt    # Deduplicated URLs
+│   ├── xurlfind3r.txt
+│   └── katana.txt
 ├── js/
-├── screenshots/
-├── takeover/
-└── logs/
+│   ├── js_files.txt          # JavaScript files
+│   ├── jsubfinder_subs.txt   # Subdomains from JS
+│   └── js_urls.txt           # URLs from JS
+├── secrets/
+│   └── js_secrets.json       # Secrets found in JS
+├── tech/
+│   └── favicon_hashes.json   # Favicon hashes
+├── vulnerabilities/
+│   ├── nuclei.txt            # Vulnerabilities found
+│   └── nuclei.json
+├── parameters/
+│   ├── all_params.txt        # All parameters
+│   ├── interesting.txt       # Interesting parameters
+│   ├── arjun.txt
+│   └── x8.txt
+├── git/
+│   ├── exposed.txt           # Exposed .git repositories
+│   └── dumps/                # Dumped repositories
+├── diff/
+│   └── *.diff                # Changes from previous scan
+└── reports/
+    └── report.md             # Final report
 ```
 
-### Enhanced Structure (Additions in Bold)
-```
-results/example.com_20250122_123456/
-├── subdomains/
-├── **api_data/**          ← NEW
-├── dns/
-├── http/
-├── **ports/**             ← NEW
-├── urls/
-├── js/
-├── **vulnerabilities/**   ← NEW
-├── **parameters/**        ← NEW
-├── **fuzzing/**           ← NEW
-├── **cloud/**             ← NEW
-├── **git/**               ← NEW
-├── **diff/**              ← NEW
-├── **reports/**           ← NEW
-├── screenshots/
-├── takeover/
-└── logs/
-```
+## Workflow Examples
 
-**All original directories still work the same way!**
-
----
-
-## 🔄 Workflow Changes
-
-### Original Workflow
-```
-1. Subdomain enumeration (3 tools)
-2. DNS resolution
-3. HTTP probing
-4. URL collection
-5. Screenshots
-6. Takeover check
-```
-
-### Enhanced Workflow (New Steps Highlighted)
-```
-1. Subdomain enumeration (3 tools + **5 APIs + CT logs**)
-2. **Cloud service detection**
-3. DNS resolution
-4. **Port scanning** (optional)
-5. HTTP probing + **WAF detection**
-6. **Vulnerability scanning** (optional)
-7. URL collection
-8. **Parameter analysis**
-9. **Git exposure check**
-10. **Directory fuzzing** (optional)
-11. Screenshots
-12. Takeover check
-13. **Diff tracking**
-14. **Report generation**
-```
-
----
-
-## 🆕 Using New Features
-
-### 1. API Integration (Recommended)
+### Bug Bounty Reconnaissance
 
 ```bash
-# First time setup
-python3 webenum_enhanced.py --configure-api
+# Phase 1: Fast passive scan
+python3 webenum.py -d target.com \
+    --skip-portscan \
+    --skip-screenshots \
+    --skip-vuln
 
-# Enter API keys when prompted:
-# - VirusTotal: YOUR_KEY
-# - SecurityTrails: YOUR_KEY
-# - AlienVault: (press Enter to skip)
-# - CertSpotter: (press Enter to skip)
+# Review results
+cat results/target.com_*/reports/report.md
 
-# Keys are saved to ~/.config/webenum/api_keys.json
+# Phase 2: Deep scan on interesting assets
+python3 webenum.py -d interesting.target.com --enable-fuzzing
 ```
 
-**Why use APIs?**
-- 50-200% more subdomains discovered
-- Historical DNS data
-- Additional context
-
-### 2. Vulnerability Scanning
+### Red Team Assessment
 
 ```bash
-# Enable on first run
-python3 webenum_enhanced.py -d example.com
-
-# Results in:
-# - vulnerabilities/nuclei_results.txt
-# - vulnerabilities/nuclei_results.json
-
-# Skip if not needed
-python3 webenum_enhanced.py -d example.com --skip-vuln-scan
+# Stealthy scan (passive only)
+python3 webenum.py -d corp.com \
+    --skip-portscan \
+    --skip-screenshots \
+    --skip-vuln
 ```
 
-### 3. Port Scanning
+### Continuous Monitoring
 
 ```bash
-# Enabled by default (top 1000 ports)
-python3 webenum_enhanced.py -d example.com
+# Daily scan via cron
+0 2 * * * cd /path/to/webenum && python3 webenum.py -d target.com
 
-# Results in:
-# - ports/nmap_scan.txt
-# - ports/nmap_scan.xml
-
-# Skip to save time
-python3 webenum_enhanced.py -d example.com --skip-portscan
+# Check for changes
+cat results/target.com_*/diff/*.diff
 ```
 
-### 4. Change Tracking
+### Penetration Testing
 
 ```bash
-# Run scan #1
-python3 webenum_enhanced.py -d example.com
-
-# Run scan #2 (later)
-python3 webenum_enhanced.py -d example.com
-
-# Check what changed:
-cat results/example.com_LATEST/diff/all_subdomains.txt.diff
-
-# Shows:
-# # NEW ITEMS
-# new-subdomain.example.com
-# 
-# # REMOVED ITEMS
-# old-subdomain.example.com
+# Comprehensive scan with all features
+python3 webenum.py -d target.com --enable-fuzzing
 ```
 
-### 5. Professional Reports
+## Batch Processing
+
+Process multiple domains:
 
 ```bash
-# After each scan, find:
-cat results/example.com_*/reports/report.md    # Human-readable
-cat results/example.com_*/reports/report.json  # Machine-readable
+# Create domains file
+cat > domains.txt << EOF
+example.com
+target.com
+test.com
+EOF
+
+# Run batch scan
+./batch_enum.sh domains.txt --skip-screenshots
 ```
 
----
+## Results Analysis
 
-## 🔍 Finding Specific Data
+### View Summary
 
-### Original Way
+```bash
+# Quick statistics
+python3 analyze_results.py results/example.com_20250122_123456/ --summary-only
+
+# Detailed analysis
+python3 analyze_results.py results/example.com_20250122_123456/
+```
+
+### Find Specific Data
+
 ```bash
 # Check subdomains
 cat results/*/subdomains/all_subdomains.txt
 
 # Check active hosts
 cat results/*/http/alive.txt
-```
-
-### Enhanced Way (Additional Options)
-```bash
-# Check all subdomains (including from APIs)
-cat results/*/subdomains/all_subdomains.txt
-
-# Check API-specific results
-cat results/*/api_data/virustotal.txt
-cat results/*/subdomains/crtsh.txt
-
-# Check cloud services
-cat results/*/cloud/aws_services.txt
 
 # Check vulnerabilities
-cat results/*/vulnerabilities/nuclei_results.txt
+cat results/*/vulnerabilities/nuclei.txt
 
-# Check for exposed Git repos
-cat results/*/git/exposed_git.txt
+# Check exposed git repos
+cat results/*/git/exposed.txt
 
-# View comprehensive report
+# View report
 cat results/*/reports/report.md
 ```
 
----
+### Check for Changes
 
-## ⚡ Performance Comparison
-
-### Original (Typical Times)
-- Small target (< 50 subs): 5-10 minutes
-- Medium target (50-200 subs): 15-30 minutes
-- Large target (> 200 subs): 30-60 minutes
-
-### Enhanced (With All Features)
-- Small target: 8-15 minutes (+3-5 min)
-- Medium target: 20-40 minutes (+5-10 min)
-- Large target: 40-90 minutes (+10-30 min)
-
-**Speed it up:**
 ```bash
-# Skip optional features
-python3 webenum_enhanced.py -d example.com \
-    --skip-portscan \
-    --skip-vuln-scan \
-    --skip-screenshots
-
-# Result: Similar speed to original
+# View diff from previous scan
+cat results/example.com_*/diff/*.diff
 ```
 
----
+## Performance Tips
 
-## 📝 Script Updates
+### Speed Up Scans
 
-### Batch Processing
-
-**Original:**
-```bash
-./batch_enum.sh domains.txt --skip-screenshots
-```
-
-**Enhanced (Works with both scripts):**
-```bash
-./batch_enum_enhanced.sh domains.txt --skip-screenshots
-
-# New options:
-./batch_enum_enhanced.sh domains.txt \
-    --parallel 3 \
-    --delay 60 \
-    --notify https://hooks.slack.com/...
-```
-
-### Cron Jobs
-
-**Original:**
-```bash
-0 2 * * * cd /opt/webenum && python3 webenum.py -d target.com
-```
-
-**Enhanced (Minimal changes):**
-```bash
-# Option 1: Fast scan (similar to original)
-0 2 * * * cd /opt/webenum && python3 webenum_enhanced.py -d target.com --skip-portscan --skip-vuln-scan
-
-# Option 2: Full scan (all features)
-0 2 * * * cd /opt/webenum && python3 webenum_enhanced.py -d target.com
-
-# Option 3: Smart scan (skip screenshots, keep scanning)
-0 2 * * * cd /opt/webenum && python3 webenum_enhanced.py -d target.com --skip-screenshots
-```
-
----
-
-## 🎯 Recommended Migration Path
-
-### Week 1: Test Run
-```bash
-# 1. Install tools
-./install_tools_enhanced.sh
-
-# 2. Test with a small target
-python3 webenum_enhanced.py -d test-target.com --skip-portscan --skip-vuln-scan
-
-# 3. Compare with original
-diff results/test-target.com_*/subdomains/all_subdomains.txt \
-     old_results/test-target.com_*/subdomains/all_subdomains.txt
-```
-
-### Week 2: Parallel Usage
-```bash
-# Run both versions on important targets
-python3 webenum_original.py -d important-target.com &
-python3 webenum_enhanced.py -d important-target.com
-
-# Compare results
-# Keep whichever gives better results
-```
-
-### Week 3: Full Migration
-```bash
-# 1. Configure API keys
-python3 webenum_enhanced.py --configure-api
-
-# 2. Update all scripts/cron jobs
-# 3. Archive old version
-mv webenum.py webenum_original.py.backup
-```
-
----
-
-## 🐛 Troubleshooting
-
-### Issue: "Tool not found"
-
-**Solution:**
-```bash
-# Check what's missing
-python3 webenum_enhanced.py --check-tools
-
-# Install missing tools
-./install_tools_enhanced.sh
-```
-
-### Issue: "Scans taking too long"
-
-**Solution:**
 ```bash
 # Skip time-consuming steps
-python3 webenum_enhanced.py -d target.com \
+python3 webenum.py -d example.com \
+    --skip-screenshots \
     --skip-portscan \
-    --skip-vuln-scan \
-    --skip-fuzzing \
-    --skip-screenshots
-```
-
-### Issue: "Not enough subdomains"
-
-**Solution:**
-```bash
-# Configure API keys for more data
-python3 webenum_enhanced.py --configure-api
-
-# APIs can increase subdomain count by 50-200%
-```
-
-### Issue: "Original batch script not working"
-
-**Solution:**
-```bash
-# Use the enhanced batch script
-./batch_enum_enhanced.sh domains.txt
-
-# Or modify original to call enhanced version:
-sed -i 's/webenum.py/webenum_enhanced.py/g' batch_enum.sh
-```
-
----
-
-## 📊 Feature Adoption Guide
-
-### Must-Have Features (Enable Immediately)
-1. **API Integration** - More subdomains
-2. **Report Generation** - Better documentation
-3. **Diff Tracking** - Monitor changes
-
-```bash
-# Configure and use
-python3 webenum_enhanced.py --configure-api
-python3 webenum_enhanced.py -d target.com
-```
-
-### Should-Have Features (Enable When Ready)
-4. **Vulnerability Scanning** - Automated detection
-5. **Cloud Detection** - Find cloud assets
-6. **Parameter Analysis** - Attack surface mapping
-
-```bash
-# Default enabled, disable if needed
-python3 webenum_enhanced.py -d target.com --skip-vuln-scan
-```
-
-### Nice-to-Have Features (Optional)
-7. **Port Scanning** - Infrastructure mapping
-8. **Directory Fuzzing** - Content discovery
-
-```bash
-# Enable when time permits
-python3 webenum_enhanced.py -d target.com --enable-fuzzing
-```
-
----
-
-## 🎓 Learning the New Features
-
-### Day 1: Basic Run
-```bash
-python3 webenum_enhanced.py -d test.com --skip-portscan --skip-vuln-scan
-# Focus: Understand new output structure
-```
-
-### Day 2: API Integration
-```bash
-python3 webenum_enhanced.py --configure-api
-python3 webenum_enhanced.py -d test.com --skip-portscan --skip-vuln-scan
-# Focus: Compare subdomain counts
-```
-
-### Day 3: Full Features
-```bash
-python3 webenum_enhanced.py -d test.com
-# Focus: Review vulnerability and port scan results
-```
-
-### Day 4: Reports & Diff
-```bash
-# Run twice
-python3 webenum_enhanced.py -d test.com
-# Focus: Understand reports and diff tracking
-```
-
-### Day 5: Production Use
-```bash
-python3 webenum_enhanced.py -d real-target.com
-# Focus: Apply to actual targets
-```
-
----
-
-## 💡 Best Practices
-
-### 1. Start Conservative
-```bash
-# First runs: skip new features
-python3 webenum_enhanced.py -d target.com \
-    --skip-portscan \
-    --skip-vuln-scan \
     --skip-fuzzing
 ```
 
-### 2. Gradually Enable Features
+### Optimize for Large Targets
+
+- Use `--skip-screenshots` to save time
+- Limit fuzzing to specific targets only
+- Use API keys for faster subdomain discovery
+
+### Resource Management
+
 ```bash
-# Week 1: Basic + APIs
-# Week 2: Add vulnerability scanning
-# Week 3: Add port scanning
-# Week 4: Try fuzzing on select targets
+# Limit memory usage (Linux)
+ulimit -m 4000000  # 4GB limit
+
+# Monitor resource usage
+watch -n 5 'ps aux | grep webenum'
 ```
 
-### 3. Monitor Resource Usage
+## Troubleshooting
+
+### Missing Tools
+
 ```bash
-# Check disk space
-du -sh results/
+# Check which tools are missing
+python3 webenum.py --check-tools
 
-# Check memory during scans
-watch -n 5 free -h
-
-# Limit if needed
-ulimit -m 4000000  # 4GB RAM limit
+# Reinstall missing tools
+./install_tools.sh
 ```
 
-### 4. Keep Original Available
-```bash
-# Rename instead of replace
-mv webenum.py webenum_original.py
+### Permission Errors
 
-# Keep both
-python3 webenum_original.py -d target.com  # When in doubt
-python3 webenum_enhanced.py -d target.com  # For more data
+```bash
+# Fix tool permissions
+chmod +x install_tools.sh
+chmod +x batch_enum.sh
+
+# Fix Go binary path
+export PATH=$PATH:$(go env GOPATH)/bin
 ```
+
+### API Rate Limits
+
+Configure API keys to avoid rate limits:
+
+```bash
+python3 webenum.py --configure-api
+```
+
+### Tool Not Found
+
+Reload your shell configuration:
+
+```bash
+source ~/.bashrc  # or ~/.zshrc
+
+# Or add to PATH manually
+export PATH=$PATH:$HOME/go/bin
+```
+
+## Best Practices
+
+### 1. Always Get Authorization
+Never scan targets without explicit permission.
+
+### 2. Start Passive
+Begin with passive techniques before active scanning.
+
+### 3. Use API Keys
+Configure API keys for better subdomain discovery (50-200% more results).
+
+### 4. Regular Scans
+Run scans regularly to track infrastructure changes via diff tracking.
+
+### 5. Review Diffs
+Always check the diff/ directory after each scan.
+
+### 6. Verify Findings
+Manually verify automated findings before reporting.
+
+### 7. Respect Rate Limits
+Use appropriate delays and respect API rate limits.
+
+### 8. Document Everything
+Keep detailed notes of your findings and methodology.
+
+## Advanced Usage
+
+### Custom Wordlists
+
+```bash
+# Place wordlists in config directory
+mkdir -p ~/.config/webenum/wordlists/
+wget https://example.com/custom-wordlist.txt \
+    -O ~/.config/webenum/wordlists/custom.txt
+
+# Tool will use wordlists automatically
+```
+
+### Integration with Other Tools
+
+```bash
+# Export results for Burp Suite
+cat results/*/urls/all_urls_clean.txt > burp_targets.txt
+
+# Export subdomains for further testing
+cat results/*/subdomains/all_subdomains.txt > subdomains.txt
+```
+
+### Automation
+
+```bash
+# Create alias
+echo 'alias webenum="python3 /path/to/webenum.py"' >> ~/.bashrc
+
+# Use alias
+webenum -d target.com
+```
+
+## Contributing
+
+Contributions welcome! Areas for improvement:
+
+- Additional reconnaissance tools
+- More API integrations
+- Enhanced reporting formats
+- Performance optimizations
+- Better error handling
+
+## Tool Credits
+
+This framework integrates many excellent open-source tools:
+
+- **ProjectDiscovery**: subfinder, httpx, dnsx, nuclei, katana, chaos
+- **TomNomNom**: assetfinder, waybackurls, anew, unfurl, qsreplace
+- **OWASP**: amass
+- **Community Tools**: gau, gospider, jsubfinder, sdlookup, feroxbuster, and many more
+
+## Legal & Ethical
+
+**Important**: Only use this tool on systems you have permission to test.
+
+- Get written authorization before scanning
+- Respect scope limitations
+- Follow responsible disclosure practices
+- Obey rate limits and ToS
+- Never cause service disruption
+
+Unauthorized scanning is illegal and unethical.
+
+## Support
+
+- **Issues**: Report bugs via GitHub Issues
+- **Questions**: Use GitHub Discussions
+- **Documentation**: Check CHEAT_SHEET.md for quick reference
+
+## License
+
+MIT License - See LICENSE file for details
 
 ---
 
-## 📞 Getting Help
+**Happy Hunting!** 🎯
 
-### Check Documentation
-1. `README_ENHANCED.md` - Overview
-2. `ENHANCED_FEATURES.md` - Detailed features
-3. `CHEAT_SHEET.md` - Quick reference
-
-### Common Questions
-
-**Q: Will my old results still work?**
-A: Yes! Old output formats are preserved.
-
-**Q: Do I need API keys?**
-A: No, but highly recommended for better results.
-
-**Q: Can I use both versions?**
-A: Yes! They can coexist.
-
-**Q: Is it slower?**
-A: Slightly, but you can skip new features.
-
----
-
-## ✅ Migration Checklist
-
-```
-Pre-Migration:
-[ ] Backup existing scripts
-[ ] Document current workflow
-[ ] Test on non-critical target
-
-Installation:
-[ ] Run install_tools_enhanced.sh
-[ ] Verify tool installation
-[ ] Configure API keys (optional)
-
-Testing:
-[ ] Single domain test
-[ ] Compare with original results
-[ ] Review new output structure
-[ ] Test batch processing
-
-Deployment:
-[ ] Update cron jobs
-[ ] Update documentation
-[ ] Train team members
-[ ] Archive original version
-
-Post-Migration:
-[ ] Monitor first week results
-[ ] Adjust configurations
-[ ] Optimize for your workflow
-[ ] Provide feedback
-```
-
----
-
-## 🚀 Quick Win Example
-
-```bash
-# Original approach
-python3 webenum.py -d target.com
-# Result: 150 subdomains
-
-# Enhanced approach (with APIs)
-python3 webenum_enhanced.py --configure-api
-# Enter VirusTotal key
-python3 webenum_enhanced.py -d target.com
-# Result: 380 subdomains + vulnerabilities + cloud assets
-
-# ROI: 2x-3x more attack surface mapped!
-```
-
----
-
-**Ready to migrate? Start with:**
-```bash
-./install_tools_enhanced.sh
-python3 webenum_enhanced.py --configure-api
-python3 webenum_enhanced.py -d test-target.com
-```
-
-**Questions? Issues? Feedback?**
-Open an issue or discussion on GitHub!
-
----
-
-*Happy Migrating! 🎯*
+For quick reference commands, see [CHEAT_SHEET.md](CHEAT_SHEET.md)
