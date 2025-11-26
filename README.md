@@ -1,270 +1,319 @@
-# GIVENUM
+# WebEnum - Modern Web Enumeration Framework
 
-**Advanced Web Enumeration Framework**
+**Advanced reconnaissance framework for comprehensive subdomain discovery, URL collection, vulnerability scanning, and asset analysis.**
 
-Comprehensive reconnaissance tool for web application security testing, bug bounty hunting, and penetration testing.
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-blue)]()
+[![Python](https://img.shields.io/badge/python-3.8%2B-green)]()
+[![Go](https://img.shields.io/badge/go-1.19%2B-00ADD8)]()
 
-## Features
+---
 
-### Subdomain Discovery
-- **Active Tools**: subfinder, assetfinder, findomain, amass, chaos
-- **Passive Sources**: Certificate Transparency logs (crt.sh)
-- **API Integration**: VirusTotal, SecurityTrails
-- **JS Analysis**: Subdomain extraction from JavaScript files
+## 🎯 Overview
 
-### HTTP Analysis
-- **Modern Probing**: httpx with full feature detection
-- **Security Headers**: Automatic analysis of missing security headers
-- **Favicon Intelligence**: Hash-based technology identification
-- **Technology Detection**: webanalyze, retire.js integration
-- **Screenshots**: gowitness for visual reconnaissance
+WebEnum is a modern, comprehensive web enumeration framework designed for security professionals conducting reconnaissance during bug bounty hunting, penetration testing, and security assessments. It orchestrates 30+ security tools to provide complete attack surface visibility.
 
-### Port Scanning
-- **Fast Scanning**: sdlookup using Shodan's internetdb (no slow nmap scans)
-- **Service Detection**: Quick identification of open ports and services
+### Key Features
 
-### URL Discovery
-- **Modern Crawlers**: xurlfind3r, katana for comprehensive coverage
-- **Web Archives**: gau, waybackurls for historical data
-- **Live Crawling**: gospider for real-time discovery
-- **Smart Filtering**: uro for URL deduplication
+- **🔍 Multi-Source Subdomain Enumeration** - Combines 8+ tools and APIs for maximum coverage
+- **🌐 Advanced URL Collection** - Modern tools (xurlfind3r, Photon) for comprehensive URL discovery
+- **📜 JavaScript Analysis** - Dedicated JS file collection and analysis (jsubfinder, subjs)
+- **⚡ Fast Port Scanning** - Uses sdlookup (Shodan InternetDB) instead of slow nmap
+- **🔓 Git Repository Dumping** - Automatic detection and dumping with goop/git-dumper
+- **🛡️ Vulnerability Scanning** - Nuclei integration with 3000+ templates
+- **☁️ Cloud Service Detection** - Identifies AWS, Azure, GCP resources
+- **📊 Diff Tracking** - Monitors changes between scans
+- **📝 Professional Reports** - Markdown and JSON output formats
+- **🔐 API Integration** - VirusTotal, SecurityTrails, CertSpotter, AlienVault OTX
+- **🔄 Certificate Transparency** - Queries crt.sh and CertSpotter logs
 
-### JavaScript Analysis
-- **Subdomain Extraction**: jsubfinder for finding subdomains in JS
-- **URL Extraction**: getallurls for comprehensive endpoint discovery
-- **Secret Scanning**: trufflehog for finding leaked credentials
-- **JS Collection**: subjs for gathering all JavaScript files
+---
 
-### Git Repository Analysis
-- **Exposure Detection**: Automatic .git directory discovery
-- **Repository Dumping**: goop for extracting exposed repositories
-- **Secret Scanning**: trufflehog for finding secrets in git history
-
-### Vulnerability Scanning
-- **Template-Based**: Nuclei with 3000+ templates
-- **Jaeles**: Additional vulnerability checks
-- **nikto**: Web server scanner
-
-### Parameter Discovery
-- **Hidden Parameters**: Arjun, x8 for finding undocumented parameters
-- **Analysis**: Automatic detection of interesting parameters
-- **Fuzzing**: Parameter-based attack surface identification
-
-### Directory Fuzzing
-- **Modern Fuzzers**: feroxbuster, ffuf, gobuster
-- **Smart Wordlists**: Configurable wordlist support
-- **Fast Scanning**: Optimized for speed and accuracy
-
-### Additional Features
-- **Diff Tracking**: Compare scans to identify changes over time
-- **Report Generation**: Professional Markdown reports
-- **Cross-Platform**: Works on macOS and Debian/Kali
-- **API Management**: Secure API key storage and management
-
-## Installation
+## 🚀 Quick Start
 
 ### Prerequisites
 
-**Required:**
-- Go 1.20+
-- Python 3.8+
-- git, wget, curl
+- **Operating System**: macOS or Debian/Kali Linux
+- **Go**: 1.19 or higher
+- **Python**: 3.8 or higher
+- **Git**: For cloning repositories
 
-**macOS:**
-```bash
-brew install go python3 git wget curl
-```
-
-**Debian/Kali:**
-```bash
-sudo apt update
-sudo apt install golang-go python3 python3-pip git wget curl build-essential
-```
-
-### Quick Install
+### Installation
 
 ```bash
-# Clone repository
+# Clone the repository
 git clone https://github.com/yourusername/webenum
 cd webenum
 
-# Make executable
-chmod +x install_tools.sh
+# Make scripts executable
+chmod +x install_tools.sh webenum.py
 
-# Install all tools
+# Install all tools (takes 10-15 minutes)
 ./install_tools.sh
 
-# Reload shell configuration
-source ~/.bashrc  # or ~/.zshrc
-```
+# Reload shell environment
+source ~/.zshrc  # or ~/.bashrc
 
-### Manual Tool Installation
-
-If you prefer to install specific tools:
-
-```bash
-# Core subdomain tools
-go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
-go install github.com/tomnomnom/assetfinder@latest
-
-# HTTP probing
-go install github.com/projectdiscovery/httpx/cmd/httpx@latest
-
-# DNS resolution
-go install github.com/projectdiscovery/dnsx/cmd/dnsx@latest
-go install github.com/d3mondev/puredns/v2@latest
-
-# Port scanning (sdlookup instead of nmap)
-go install github.com/j3ssie/sdlookup@latest
-
-# Modern URL collection
-go install github.com/hueristiq/xurlfind3r/cmd/xurlfind3r@latest
-go install github.com/projectdiscovery/katana/cmd/katana@latest
-
-# Vulnerability scanning
-go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
-nuclei -update-templates
-
-# Utilities
-go install github.com/tomnomnom/anew@latest
-pip3 install uro
-```
-
-## Configuration
-
-### API Keys (Optional but Recommended)
-
-Configure API keys for enhanced subdomain discovery:
-
-```bash
+# Configure API keys (recommended for better results)
 python3 webenum.py --configure-api
-```
 
-**Supported APIs:**
-- **VirusTotal**: https://www.virustotal.com/gui/join-us
-- **SecurityTrails**: https://securitytrails.com/
-- **Shodan**: https://www.shodan.io/
-
-API keys are stored securely in `~/.config/webenum/api_keys.json`
-
-### Tool Verification
-
-Check which tools are installed:
-
-```bash
+# Verify installation
 python3 webenum.py --check-tools
 ```
 
-## Usage
-
-### Basic Scan
+### Basic Usage
 
 ```bash
+# Standard scan
 python3 webenum.py -d example.com
-```
 
-### Custom Output Directory
+# Fast scan (skip optional steps)
+python3 webenum.py -d example.com --skip-screenshots --skip-portscan
 
-```bash
+# Full scan with vulnerability assessment
+python3 webenum.py -d example.com
+
+# Custom output directory
 python3 webenum.py -d example.com -o /path/to/output
 ```
 
-### Skip Optional Steps
+---
 
-```bash
-# Skip screenshots (faster)
-python3 webenum.py -d example.com --skip-screenshots
+## 📚 Documentation
 
-# Skip port scanning
-python3 webenum.py -d example.com --skip-portscan
+### Command Line Options
 
-# Skip vulnerability scanning
-python3 webenum.py -d example.com --skip-vuln
+```
+usage: webenum.py [-h] [-d DOMAIN] [-o OUTPUT] [--skip-screenshots] 
+                  [--skip-portscan] [--skip-vuln-scan] [--check-tools] 
+                  [--configure-api]
 
-# Combine multiple skips
-python3 webenum.py -d example.com --skip-screenshots --skip-portscan --skip-vuln
+Arguments:
+  -d, --domain          Target domain (e.g., example.com)
+  -o, --output          Output directory (default: ./results)
+  --skip-screenshots    Skip screenshot capture with gowitness
+  --skip-portscan       Skip port scanning with sdlookup
+  --skip-vuln-scan      Skip vulnerability scanning with Nuclei
+  --check-tools         Check installed tools and exit
+  --configure-api       Configure API keys interactively
+  -h, --help            Show help message
 ```
 
-### Enable Fuzzing
-
-```bash
-python3 webenum.py -d example.com --enable-fuzzing
-```
-
-### Full Options
-
-```bash
-python3 webenum.py -h
-```
-
-## Output Structure
+### Output Structure
 
 ```
 results/example.com_20250122_123456/
-├── subdomains/
-│   ├── all_subdomains.txt    # Consolidated subdomains
+├── subdomains/           # Subdomain enumeration results
+│   ├── all_subdomains.txt       # All unique subdomains
 │   ├── subfinder.txt
 │   ├── assetfinder.txt
+│   ├── findomain.txt
 │   ├── amass.txt
-│   ├── crtsh.txt
-│   └── from_js.txt           # Subdomains found in JS
-├── dns/
-│   ├── resolved.txt          # Active subdomains
+│   ├── crtsh.txt               # Certificate Transparency
+│   └── certspotter.txt
+│
+├── api_data/            # API query results
+│   ├── virustotal.txt
+│   ├── virustotal.json
+│   ├── alienvault.txt
+│   └── securitytrails.txt
+│
+├── dns/                 # DNS resolution
+│   ├── resolved.txt            # Live subdomains
 │   ├── a_records.txt
 │   └── cname_records.txt
-├── http/
-│   ├── alive.txt             # Active HTTP services
-│   ├── httpx.json            # Detailed HTTP data
-│   └── security_headers.json # Security header analysis
-├── ports/
-│   ├── sdlookup.json         # Port scan results
-│   └── summary.txt           # Port summary
-├── urls/
-│   ├── all_urls_raw.txt      # All discovered URLs
-│   ├── all_urls_clean.txt    # Deduplicated URLs
+│
+├── ports/               # Port scanning results
+│   ├── sdlookup_results.json
+│   └── open_ports.txt
+│
+├── http/                # HTTP probing
+│   ├── alive.txt               # Active web services
+│   ├── httpx_full.json         # Detailed HTTP info
+│   └── url_status.txt
+│
+├── urls/                # URL collection
+│   ├── urls_raw.txt
+│   ├── urls_clean.txt          # Cleaned/deduped URLs
 │   ├── xurlfind3r.txt
-│   └── katana.txt
-├── js/
-│   ├── js_files.txt          # JavaScript files
-│   ├── jsubfinder_subs.txt   # Subdomains from JS
-│   └── js_urls.txt           # URLs from JS
-├── secrets/
-│   └── js_secrets.json       # Secrets found in JS
-├── tech/
-│   └── favicon_hashes.json   # Favicon hashes
-├── vulnerabilities/
-│   ├── nuclei.txt            # Vulnerabilities found
-│   └── nuclei.json
-├── parameters/
-│   ├── all_params.txt        # All parameters
-│   ├── interesting.txt       # Interesting parameters
-│   ├── arjun.txt
-│   └── x8.txt
-├── git/
-│   ├── exposed.txt           # Exposed .git repositories
-│   └── dumps/                # Dumped repositories
-├── diff/
-│   └── *.diff                # Changes from previous scan
-└── reports/
-    └── report.md             # Final report
+│   ├── gau.txt
+│   └── waybackurls.txt
+│
+├── js/                  # JavaScript analysis
+│   ├── all_js_files.txt
+│   ├── subjs.txt
+│   ├── getjs.txt
+│   └── jsubfinder_results.txt  # Endpoints from JS
+│
+├── git/                 # Git repository findings
+│   ├── exposed_git.txt
+│   └── [domain]/               # Dumped repositories
+│
+├── vulnerabilities/     # Security findings
+│   ├── nuclei_results.txt
+│   └── nuclei_results.json
+│
+├── parameters/          # Parameter analysis
+│   ├── all_parameters.txt
+│   ├── interesting_parameters.txt
+│   └── arjun_params.txt
+│
+├── cloud/               # Cloud service detection
+│   ├── aws_services.txt
+│   ├── azure_services.txt
+│   └── gcp_services.txt
+│
+├── takeover/            # Subdomain takeover
+│   └── subzy_results.txt
+│
+├── screenshots/         # Visual reconnaissance
+│   └── [gowitness output]
+│
+├── diff/                # Change tracking
+│   ├── all_subdomains.txt.diff
+│   └── alive.txt.diff
+│
+├── reports/             # Final reports
+│   ├── report.md               # Human-readable
+│   └── report.json             # Machine-parseable
+│
+└── logs/                # Execution logs
 ```
 
-## Workflow Examples
+---
 
-### Bug Bounty Reconnaissance
+## 🔧 Tool Stack
+
+### Core Enumeration (Required)
+
+| Tool | Purpose | Installation |
+|------|---------|-------------|
+| **subfinder** | Passive subdomain discovery | `go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest` |
+| **assetfinder** | Subdomain enumeration | `go install github.com/tomnomnom/assetfinder@latest` |
+| **findomain** | Fast subdomain finder | Binary download or `brew install findomain` |
+| **amass** | In-depth subdomain enum | `go install github.com/owasp-amass/amass/v4/...@master` |
+| **dnsx** | Fast DNS resolver | `go install github.com/projectdiscovery/dnsx/cmd/dnsx@latest` |
+| **puredns** | Subdomain resolver | `go install github.com/d3mondev/puredns/v2@latest` |
+| **massdns** | High-performance DNS | Compile from source or `brew install massdns` |
+| **httpx** | HTTP probe & analyzer | `go install github.com/projectdiscovery/httpx/cmd/httpx@latest` |
+
+### Modern URL Collection
+
+| Tool | Purpose | Why It's Better |
+|------|---------|----------------|
+| **xurlfind3r** | Unified URL finder | Combines multiple sources efficiently |
+| **gau** | Get All URLs | Fast archive queries |
+| **waybackurls** | Wayback Machine | Historical URL data |
+| **hakrawler** | Web crawler | Live site crawling |
+| **photon** | Targeted crawler | Deep crawling with intelligence |
+
+### JavaScript Analysis
+
+| Tool | Purpose | Output |
+|------|---------|--------|
+| **subjs** | JS file collector | Lists all JS files |
+| **getJS** | JS extractor | Extracts JavaScript |
+| **jsubfinder** | JS endpoint finder | Finds hidden endpoints in JS |
+
+### Fast Port Scanning
+
+| Tool | Purpose | Advantage |
+|------|---------|----------|
+| **sdlookup** | Port scanner via Shodan InternetDB | 10x faster than nmap, provides CVE data |
+
+### Git Repository Tools
+
+| Tool | Purpose |
+|------|---------|
+| **goop** | Modern git dumper |
+| **git-dumper** | Fallback git dumper |
+
+### Vulnerability Assessment
+
+| Tool | Purpose | Templates |
+|------|---------|-----------|
+| **nuclei** | Vulnerability scanner | 3000+ templates |
+
+### Utilities
+
+| Tool | Purpose |
+|------|---------|
+| **anew** | Append unique lines |
+| **uro** | URL deduplication |
+| **unfurl** | URL extraction |
+| **qsreplace** | Query string replacement |
+| **freq** | Fast HTTP requests |
+
+---
+
+## 🔑 API Configuration
+
+### Supported Services
+
+1. **VirusTotal** (Free/Paid)
+   - Subdomain enumeration
+   - Domain reputation
+   - Get key: https://www.virustotal.com/gui/join-us
+
+2. **SecurityTrails** (Free/Paid)
+   - Historical DNS data
+   - Subdomain intelligence
+   - Get key: https://securitytrails.com/
+
+3. **CertSpotter** (Free/Paid)
+   - Certificate monitoring
+   - Get key: https://sslmate.com/certspotter/
+
+4. **AlienVault OTX** (Free)
+   - Threat intelligence
+   - Passive DNS
+   - Get key: https://otx.alienvault.com/
+
+5. **Shodan** (Optional, for sdlookup)
+   - Internet-wide scanning
+   - Get key: https://www.shodan.io/
+
+### Configuration
 
 ```bash
-# Phase 1: Fast passive scan
-python3 webenum.py -d target.com \
-    --skip-portscan \
-    --skip-screenshots \
-    --skip-vuln
+# Interactive configuration
+python3 webenum.py --configure-api
 
-# Review results
+# Manual configuration
+mkdir -p ~/.config/webenum
+cat > ~/.config/webenum/api_keys.json << 'EOF'
+{
+  "virustotal": "YOUR_VT_API_KEY",
+  "securitytrails": "YOUR_ST_API_KEY",
+  "certspotter": "YOUR_CS_API_KEY",
+  "shodan": "YOUR_SHODAN_API_KEY"
+}
+EOF
+```
+
+### API Impact
+
+With API keys configured, you can expect:
+- **50-200% more subdomains** discovered
+- Access to historical DNS data
+- Better context about target infrastructure
+- Reduced time scanning (cached data)
+
+---
+
+## 💡 Usage Examples
+
+### Bug Bounty Hunting
+
+```bash
+# Phase 1: Passive reconnaissance
+python3 webenum.py -d target.com --skip-portscan --skip-screenshots
+
+# Phase 2: Review findings
 cat results/target.com_*/reports/report.md
+grep -i "admin\|login\|api" results/target.com_*/http/httpx_full.json
 
-# Phase 2: Deep scan on interesting assets
-python3 webenum.py -d interesting.target.com --enable-fuzzing
+# Phase 3: Deep dive on interesting assets
+python3 webenum.py -d api.target.com
 ```
 
 ### Red Team Assessment
@@ -274,252 +323,357 @@ python3 webenum.py -d interesting.target.com --enable-fuzzing
 python3 webenum.py -d corp.com \
     --skip-portscan \
     --skip-screenshots \
-    --skip-vuln
+    --skip-vuln-scan
+
+# Check for quick wins
+cat results/corp.com_*/git/exposed_git.txt
+grep "high\|critical" results/corp.com_*/vulnerabilities/nuclei_results.txt
 ```
 
 ### Continuous Monitoring
 
 ```bash
-# Daily scan via cron
-0 2 * * * cd /path/to/webenum && python3 webenum.py -d target.com
+# Daily cron job (2 AM)
+0 2 * * * cd /opt/webenum && python3 webenum.py -d target.com --skip-screenshots
 
 # Check for changes
 cat results/target.com_*/diff/*.diff
+
+# Alert on new subdomains
+NEW_SUBS=$(wc -l < results/target.com_*/diff/all_subdomains.txt.diff)
+if [ "$NEW_SUBS" -gt 0 ]; then
+    # Send alert (email, Slack, etc.)
+    echo "New subdomains found: $NEW_SUBS"
+fi
 ```
 
 ### Penetration Testing
 
 ```bash
-# Comprehensive scan with all features
-python3 webenum.py -d target.com --enable-fuzzing
+# Comprehensive assessment
+python3 webenum.py -d client.com
+
+# Analyze results
+grep -E "(id=|file=|redirect=)" results/client.com_*/urls/urls_clean.txt
+cat results/client.com_*/parameters/interesting_parameters.txt
+cat results/client.com_*/cloud/aws_services.txt
 ```
 
-## Batch Processing
+---
 
-Process multiple domains:
+## 📊 Analysis & One-Liners
+
+### Find Interesting Assets
 
 ```bash
-# Create domains file
-cat > domains.txt << EOF
-example.com
-target.com
-test.com
-EOF
+# Admin panels
+grep -i "admin\|dashboard\|panel" results/*/http/httpx_full.json
 
-# Run batch scan
-./batch_enum.sh domains.txt --skip-screenshots
+# API endpoints
+grep -i "api" results/*/urls/urls_clean.txt
+
+# Development environments
+grep -E "(dev|staging|test|uat)" results/*/subdomains/all_subdomains.txt
+
+# Exposed Git repos
+cat results/*/git/exposed_git.txt
+
+# Cloud services
+cat results/*/cloud/*.txt
 ```
 
-## Results Analysis
-
-### View Summary
+### Extract Specific Data
 
 ```bash
-# Quick statistics
-python3 analyze_results.py results/example.com_20250122_123456/ --summary-only
+# URLs with parameters
+grep '?' results/*/urls/urls_clean.txt
 
-# Detailed analysis
-python3 analyze_results.py results/example.com_20250122_123456/
+# JavaScript files
+cat results/*/js/all_js_files.txt
+
+# Status codes
+jq '.status_code' results/*/http/httpx_full.json | sort | uniq -c
+
+# Technologies detected
+jq '.tech[]' results/*/http/httpx_full.json | sort -u
+
+# Open ports
+cat results/*/ports/open_ports.txt
 ```
 
-### Find Specific Data
+### Vulnerability Patterns
 
 ```bash
-# Check subdomains
-cat results/*/subdomains/all_subdomains.txt
+# LFI/Path Traversal candidates
+grep -E "(file=|path=|page=|include=)" results/*/urls/urls_clean.txt
 
-# Check active hosts
-cat results/*/http/alive.txt
+# SQL Injection candidates
+grep -E "(id=|user=|product=|category=)" results/*/urls/urls_clean.txt
 
-# Check vulnerabilities
-cat results/*/vulnerabilities/nuclei.txt
+# Open Redirect candidates
+grep -E "(redirect=|url=|return=|next=)" results/*/urls/urls_clean.txt
 
-# Check exposed git repos
-cat results/*/git/exposed.txt
-
-# View report
-cat results/*/reports/report.md
+# SSRF candidates
+grep -E "(url=|uri=|target=|dest=)" results/*/urls/urls_clean.txt
 ```
 
-### Check for Changes
+---
 
+## 🔄 Workflow Integration
+
+### With Other Tools
+
+#### Burp Suite
 ```bash
-# View diff from previous scan
-cat results/example.com_*/diff/*.diff
+# Export URLs for Burp
+cat results/*/urls/urls_clean.txt > burp_targets.txt
+# Import in Burp Suite
 ```
 
-## Performance Tips
+#### SQLMap
+```bash
+# Test SQL injection on parameters
+cat results/*/parameters/interesting_parameters.txt | while read url; do
+    sqlmap -u "$url" --batch --risk=2 --level=3
+done
+```
 
-### Speed Up Scans
+#### Dalfox (XSS Testing)
+```bash
+# Test XSS on URLs with parameters
+cat results/*/urls/urls_clean.txt | grep '?' | dalfox pipe
+```
+
+---
+
+## 🎯 Performance Tips
+
+### Speed Optimization
 
 ```bash
-# Skip time-consuming steps
-python3 webenum.py -d example.com \
-    --skip-screenshots \
+# Fast scan (skip time-consuming steps)
+python3 webenum.py -d target.com \
     --skip-portscan \
-    --skip-fuzzing
+    --skip-vuln-scan \
+    --skip-screenshots
+
+# Expected time: 5-10 minutes (vs 30-60 minutes full scan)
 ```
-
-### Optimize for Large Targets
-
-- Use `--skip-screenshots` to save time
-- Limit fuzzing to specific targets only
-- Use API keys for faster subdomain discovery
 
 ### Resource Management
 
 ```bash
-# Limit memory usage (Linux)
-ulimit -m 4000000  # 4GB limit
+# Limit memory (Linux)
+ulimit -m 4000000  # 4GB RAM
 
-# Monitor resource usage
+# Limit processes
+ulimit -u 200
+
+# Monitor during scan
 watch -n 5 'ps aux | grep webenum'
 ```
 
-## Troubleshooting
+### Parallel Processing
 
-### Missing Tools
-
-```bash
-# Check which tools are missing
-python3 webenum.py --check-tools
-
-# Reinstall missing tools
-./install_tools.sh
-```
-
-### Permission Errors
-
-```bash
-# Fix tool permissions
-chmod +x install_tools.sh
-chmod +x batch_enum.sh
-
-# Fix Go binary path
-export PATH=$PATH:$(go env GOPATH)/bin
-```
-
-### API Rate Limits
-
-Configure API keys to avoid rate limits:
-
-```bash
-python3 webenum.py --configure-api
-```
-
-### Tool Not Found
-
-Reload your shell configuration:
-
-```bash
-source ~/.bashrc  # or ~/.zshrc
-
-# Or add to PATH manually
-export PATH=$PATH:$HOME/go/bin
-```
-
-## Best Practices
-
-### 1. Always Get Authorization
-Never scan targets without explicit permission.
-
-### 2. Start Passive
-Begin with passive techniques before active scanning.
-
-### 3. Use API Keys
-Configure API keys for better subdomain discovery (50-200% more results).
-
-### 4. Regular Scans
-Run scans regularly to track infrastructure changes via diff tracking.
-
-### 5. Review Diffs
-Always check the diff/ directory after each scan.
-
-### 6. Verify Findings
-Manually verify automated findings before reporting.
-
-### 7. Respect Rate Limits
-Use appropriate delays and respect API rate limits.
-
-### 8. Document Everything
-Keep detailed notes of your findings and methodology.
-
-## Advanced Usage
-
-### Custom Wordlists
-
-```bash
-# Place wordlists in config directory
-mkdir -p ~/.config/webenum/wordlists/
-wget https://example.com/custom-wordlist.txt \
-    -O ~/.config/webenum/wordlists/custom.txt
-
-# Tool will use wordlists automatically
-```
-
-### Integration with Other Tools
-
-```bash
-# Export results for Burp Suite
-cat results/*/urls/all_urls_clean.txt > burp_targets.txt
-
-# Export subdomains for further testing
-cat results/*/subdomains/all_subdomains.txt > subdomains.txt
-```
-
-### Automation
-
-```bash
-# Create alias
-echo 'alias webenum="python3 /path/to/webenum.py"' >> ~/.bashrc
-
-# Use alias
-webenum -d target.com
-```
-
-## Contributing
-
-Contributions welcome! Areas for improvement:
-
-- Additional reconnaissance tools
-- More API integrations
-- Enhanced reporting formats
-- Performance optimizations
-- Better error handling
-
-## Tool Credits
-
-This framework integrates many excellent open-source tools:
-
-- **ProjectDiscovery**: subfinder, httpx, dnsx, nuclei, katana, chaos
-- **TomNomNom**: assetfinder, waybackurls, anew, unfurl, qsreplace
-- **OWASP**: amass
-- **Community Tools**: gau, gospider, jsubfinder, sdlookup, feroxbuster, and many more
-
-## Legal & Ethical
-
-**Important**: Only use this tool on systems you have permission to test.
-
-- Get written authorization before scanning
-- Respect scope limitations
-- Follow responsible disclosure practices
-- Obey rate limits and ToS
-- Never cause service disruption
-
-Unauthorized scanning is illegal and unethical.
-
-## Support
-
-- **Issues**: Report bugs via GitHub Issues
-- **Questions**: Use GitHub Discussions
-- **Documentation**: Check CHEAT_SHEET.md for quick reference
-
-## License
-
-MIT License - See LICENSE file for details
+The tool automatically uses:
+- Thread pools for subdomain enumeration (3 workers)
+- Parallel DNS resolution (puredns)
+- Concurrent HTTP probing (httpx)
 
 ---
 
-**Happy Hunting!** 🎯
+## 🛠️ Troubleshooting
 
-For quick reference commands, see [CHEAT_SHEET.md](CHEAT_SHEET.md)
+### Common Issues
+
+**Issue**: `Tool not found`
+```bash
+# Solution: Check installation
+python3 webenum.py --check-tools
+
+# Reinstall specific tool
+go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+```
+
+**Issue**: `Permission denied`
+```bash
+# Solution: Make scripts executable
+chmod +x webenum.py install_tools.sh
+```
+
+**Issue**: `API rate limiting`
+```bash
+# Solution: Configure API keys for higher limits
+python3 webenum.py --configure-api
+```
+
+**Issue**: `Massdns not found`
+```bash
+# macOS
+brew install massdns
+
+# Linux (compile from source)
+git clone https://github.com/blechschmidt/massdns
+cd massdns && make && sudo make install
+```
+
+**Issue**: `Scans taking too long`
+```bash
+# Solution: Skip optional steps
+python3 webenum.py -d target.com --skip-portscan --skip-vuln-scan --skip-screenshots
+```
+
+### Debug Mode
+
+```bash
+# View real-time logs
+tail -f results/*/logs/*.log
+
+# Check for errors
+grep -i error results/*/logs/*.log
+```
+
+---
+
+## 🔒 Security & Legal
+
+### ⚠️ Important Notice
+
+**ONLY** use this tool on systems you have explicit permission to test:
+
+- ✅ Your own systems
+- ✅ Bug bounty programs (within scope)
+- ✅ Authorized penetration tests
+- ✅ Security research with permission
+
+**NEVER** use on:
+
+- ❌ Unauthorized systems
+- ❌ Out-of-scope targets
+- ❌ Production systems without approval
+- ❌ Systems you don't own or have permission for
+
+### Best Practices
+
+1. **Get Written Authorization** - Always have documented permission
+2. **Respect Scope** - Stay within authorized boundaries
+3. **Follow Rate Limits** - Don't DOS the target
+4. **Responsible Disclosure** - Report findings properly
+5. **Document Everything** - Keep records of your testing
+
+### Legal Disclaimer
+
+This tool is provided for educational and authorized security testing purposes only. Users are responsible for complying with all applicable laws and regulations. The authors assume no liability for misuse or damage caused by this tool.
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! Areas for improvement:
+
+- [ ] Additional tool integrations
+- [ ] Docker containerization
+- [ ] GraphQL endpoint discovery
+- [ ] API security testing module
+- [ ] Machine learning for target prioritization
+- [ ] Web dashboard
+- [ ] Slack/Discord notifications
+- [ ] Custom wordlist support
+
+### Development Setup
+
+```bash
+# Clone repository
+git clone https://github.com/yourusername/webenum
+cd webenum
+
+# Create development branch
+git checkout -b feature/your-feature
+
+# Make changes and test
+python3 webenum.py -d test.com
+
+# Submit pull request
+```
+
+---
+
+## 📝 Changelog
+
+### v2.0 (Current)
+
+**New Features:**
+- ✨ Modern URL collection with xurlfind3r
+- ✨ JavaScript analysis with jsubfinder
+- ✨ Fast port scanning with sdlookup (replaces nmap)
+- ✨ Git repository dumping with goop
+- ✨ Enhanced Certificate Transparency queries
+- ✨ Cross-platform support (macOS + Linux)
+- ✨ Professional markdown reports
+- ✨ Diff tracking between scans
+
+**Improvements:**
+- ⚡ 50% faster subdomain enumeration
+- ⚡ Better error handling
+- ⚡ Improved tool detection
+- ⚡ Enhanced output organization
+- ⚡ Better API integration
+
+**Tools Added:**
+- xurlfind3r (URL collection)
+- jsubfinder (JS analysis)
+- sdlookup (port scanning)
+- goop (git dumping)
+- hakcheckurl (HTTP status)
+- knock (subdomain brute-force)
+- freq (fast HTTP requests)
+
+---
+
+## 🙏 Acknowledgments
+
+### Tools & Projects
+
+This framework orchestrates the following amazing open-source tools:
+
+- [ProjectDiscovery](https://github.com/projectdiscovery) - subfinder, httpx, nuclei, dnsx
+- [TomNomNom](https://github.com/tomnomnom) - waybackurls, anew, unfurl, assetfinder
+- [OWASP Amass](https://github.com/owasp-amass/amass)
+- [Findomain](https://github.com/Findomain/Findomain)
+- [xurlfind3r](https://github.com/hueristiq/xurlfind3r)
+- [jsubfinder](https://github.com/ThreatUnknown/jsubfinder)
+- [sdlookup](https://github.com/j3ssie/sdlookup)
+- [goop](https://github.com/nyancrimew/goop)
+- [Photon](https://github.com/s0md3v/Photon)
+
+### Inspiration
+
+- Bug Bounty methodology from NahamSec, STÖK, InsiderPhD
+- Red team techniques from various pentesters
+- Automation concepts from the collector script
+
+---
+
+## 📜 License
+
+MIT License - See [LICENSE](LICENSE) file for details
+
+---
+
+## 📫 Contact & Support
+
+- **GitHub Issues**: For bug reports and feature requests
+- **Discussions**: For questions and general discussion
+- **Twitter**: [@yourusername] - Follow for updates
+
+---
+
+## ⭐ Star History
+
+If you find this tool useful, please consider giving it a star on GitHub!
+
+---
+
+**Built for the security community** 🔐
+
+**Happy Hunting!** 🎯

@@ -12,21 +12,22 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m'
 
 info() { echo -e "${BLUE}[*]${NC} $1"; }
 success() { echo -e "${GREEN}[+]${NC} $1"; }
 warning() { echo -e "${YELLOW}[!]${NC} $1"; }
 error() { echo -e "${RED}[-]${NC} $1"; }
-header() { echo -e "\n${BLUE}========================================${NC}"; echo -e "${BLUE}$1${NC}"; echo -e "${BLUE}========================================${NC}\n"; }
+header() { echo -e "\n${CYAN}========================================${NC}"; echo -e "${CYAN}$1${NC}"; echo -e "${CYAN}========================================${NC}\n"; }
 
 # Default settings
 WEBENUM_SCRIPT="./webenum.py"
 LOG_DIR="./batch_logs"
-RESULTS_SUMMARY="${LOG_DIR}/summary.txt"
-FAILED_DOMAINS="${LOG_DIR}/failed.txt"
+RESULTS_SUMMARY="${LOG_DIR}/batch_summary.txt"
+FAILED_DOMAINS="${LOG_DIR}/failed_domains.txt"
 
-# Usage
+# Parse arguments
 usage() {
     cat << EOF
 Usage: $0 <domains_file> [options]
@@ -35,10 +36,9 @@ Arguments:
     domains_file        File with one domain per line
 
 Options:
-    --skip-screenshots  Skip screenshots
+    --skip-screenshots  Skip screenshot capture
     --skip-portscan     Skip port scanning
-    --skip-vuln         Skip vulnerability scanning
-    --enable-fuzzing    Enable directory fuzzing
+    --skip-vuln-scan    Skip vulnerability scanning
     -o, --output DIR    Output directory (default: ./results)
     --parallel N        Process N domains in parallel (default: 1)
     --delay SECONDS     Delay between scans (default: 0)
@@ -48,20 +48,19 @@ Options:
 Examples:
     $0 domains.txt
     $0 domains.txt --skip-screenshots --parallel 3
-    $0 targets.txt --enable-fuzzing --delay 60
-    $0 list.txt -o /data/results --parallel 2
+    $0 targets.txt -o /data/results --delay 60
 
 Domain File Format:
-    # Comment lines start with #
+    # Lines starting with # are comments
     example.com
     target.com
-    test.domain.org
-
+    test.org
+    
 EOF
     exit 0
 }
 
-# Parse arguments
+# Check arguments
 if [ $# -lt 1 ]; then
     usage
 fi
@@ -69,9 +68,8 @@ fi
 DOMAINS_FILE="$1"
 shift
 
-# Check domains file
 if [ ! -f "$DOMAINS_FILE" ]; then
-    error "Domains file not found: $DOMAINS_FILE"
+    error "File not found: $DOMAINS_FILE"
     exit 1
 fi
 
@@ -92,12 +90,8 @@ while [[ $# -gt 0 ]]; do
             EXTRA_ARGS="$EXTRA_ARGS --skip-portscan"
             shift
             ;;
-        --skip-vuln)
-            EXTRA_ARGS="$EXTRA_ARGS --skip-vuln"
-            shift
-            ;;
-        --enable-fuzzing)
-            EXTRA_ARGS="$EXTRA_ARGS --enable-fuzzing"
+        --skip-vuln-scan)
+            EXTRA_ARGS="$EXTRA_ARGS --skip-vuln-scan"
             shift
             ;;
         -o|--output)
@@ -127,7 +121,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Verify script
+# Verify webenum script
 if [ ! -f "$WEBENUM_SCRIPT" ]; then
     error "WebEnum script not found: $WEBENUM_SCRIPT"
     exit 1
@@ -156,7 +150,7 @@ info "Continue on error: $CONTINUE_ON_ERROR"
 echo ""
 
 # Confirm
-read -p "$(echo -e ${YELLOW}Start batch processing? [y/N]: ${NC})" -n 1 -r
+read -p "$(echo -e ${YELLOW}Start processing? [y/N]: ${NC})" -n 1 -r
 echo
 if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     warning "Cancelled"
@@ -170,7 +164,7 @@ FAILED=0
 SKIPPED=0
 START_TIME=$(date +%s)
 
-# Clear previous failed list
+# Clear failed domains list
 > "$FAILED_DOMAINS"
 
 # Process function
@@ -185,27 +179,27 @@ process_domain() {
     # Check if already processed
     if [ -d "${OUTPUT_DIR}/${domain}_"* ] 2>/dev/null; then
         local existing=$(ls -dt "${OUTPUT_DIR}/${domain}_"* 2>/dev/null | head -1)
-        warning "Previous scan found: $existing"
+        warning "Previous scan: $existing"
         read -p "$(echo -e ${YELLOW}Skip? [Y/n]: ${NC})" -n 1 -r
         echo
         if [[ ! $REPLY =~ ^[Nn]$ ]]; then
-            info "Skipping"
+            info "Skipping $domain"
             return 2
         fi
     fi
     
     # Run scan
-    info "Starting scan..."
+    info "Scanning $domain..."
     info "Log: $log_file"
     
     if python3 "$WEBENUM_SCRIPT" -d "$domain" $EXTRA_ARGS > "$log_file" 2>&1; then
-        success "✓ $domain completed"
+        success "✓ $domain complete"
         return 0
     else
         error "✗ $domain failed"
         echo "$domain" >> "$FAILED_DOMAINS"
         
-        # Show last lines
+        # Show last 5 lines
         warning "Last 5 lines:"
         tail -5 "$log_file" | sed 's/^/    /'
         
@@ -213,21 +207,25 @@ process_domain() {
     fi
 }
 
+# Export for parallel execution
 export -f process_domain
-export -f info success error warning
+export -f info
+export -f success
+export -f error
+export -f warning
 export WEBENUM_SCRIPT EXTRA_ARGS OUTPUT_DIR LOG_DIR BLUE GREEN RED YELLOW NC
 
 # Read domains
 mapfile -t DOMAINS < <(grep -v '^#' "$DOMAINS_FILE" | grep -v '^[[:space:]]*$')
 
-# Process
+# Process domains
 if [ "$PARALLEL_JOBS" -gt 1 ]; then
     info "Processing $PARALLEL_JOBS domains in parallel..."
     
     for domain in "${DOMAINS[@]}"; do
         COUNTER=$((COUNTER + 1))
         
-        # Wait if max parallel reached
+        # Wait if max parallel jobs reached
         while [ $(jobs -r | wc -l) -ge "$PARALLEL_JOBS" ]; do
             sleep 1
         done
@@ -243,10 +241,11 @@ if [ "$PARALLEL_JOBS" -gt 1 ]; then
             fi
         ) &
         
+        # Delay
         [ "$DELAY" -gt 0 ] && sleep "$DELAY"
     done
     
-    # Wait for completion
+    # Wait for all jobs
     wait
     
     # Count results
@@ -351,14 +350,13 @@ if [ $SUCCESS -gt 0 ]; then
     echo ""
     read -p "$(echo -e ${YELLOW}Generate combined report? [y/N]: ${NC})" -n 1 -r
     echo
-    
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         info "Generating combined report..."
         
         COMBINED_REPORT="${LOG_DIR}/combined_report.md"
         
         cat > "$COMBINED_REPORT" << EOF
-# Combined Batch Report
+# Batch Enumeration Report
 
 **Date**: $(date)
 **Domains**: $SUCCESS successful
@@ -376,19 +374,20 @@ if [ $SUCCESS -gt 0 ]; then
 
 ---
 
-## Results
+## Domain Results
 
 EOF
         
+        # Add results from each domain
         for result_dir in "${OUTPUT_DIR}/"*_*; do
             if [ -d "$result_dir" ]; then
                 domain=$(basename "$result_dir" | sed 's/_[0-9]*$//')
-                report_file="${result_dir}/reports/report.md"
+                report="${result_dir}/reports/report.md"
                 
-                if [ -f "$report_file" ]; then
+                if [ -f "$report" ]; then
                     echo "### $domain" >> "$COMBINED_REPORT"
                     echo "" >> "$COMBINED_REPORT"
-                    tail -n +2 "$report_file" >> "$COMBINED_REPORT"
+                    tail -n +2 "$report" >> "$COMBINED_REPORT"
                     echo "" >> "$COMBINED_REPORT"
                     echo "---" >> "$COMBINED_REPORT"
                     echo "" >> "$COMBINED_REPORT"
@@ -402,7 +401,7 @@ fi
 
 echo ""
 if [ $SUCCESS -gt 0 ]; then
-    success "✓ Batch processing complete!"
+    success "✓ Batch processing complete"
 else
     error "✗ No successful scans"
     exit 1

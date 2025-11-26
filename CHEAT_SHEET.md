@@ -1,394 +1,365 @@
 # WebEnum - Quick Reference
 
-## 🚀 Common Commands
+## 🚀 Installation
 
-### Installation
 ```bash
 # Install all tools
+chmod +x install_tools.sh
 ./install_tools.sh
 
 # Configure API keys
 python3 webenum.py --configure-api
 
-# Check tools
+# Verify installation
 python3 webenum.py --check-tools
 ```
 
+## ⚡ Common Commands
+
 ### Basic Scans
+
 ```bash
 # Standard scan
 python3 webenum.py -d example.com
 
-# Fast scan (skip optional steps)
-python3 webenum.py -d example.com --skip-screenshots --skip-portscan --skip-vuln
+# Fast scan (skip optional)
+python3 webenum.py -d example.com --skip-screenshots --skip-portscan
 
-# Deep scan with fuzzing
-python3 webenum.py -d example.com --enable-fuzzing
+# Skip vulnerability scan
+python3 webenum.py -d example.com --skip-vuln-scan
 
 # Custom output
 python3 webenum.py -d example.com -o /path/to/output
 ```
 
 ### Batch Processing
+
 ```bash
-# Multiple domains
-./batch_enum.sh domains.txt --skip-screenshots
+# Process multiple domains
+./batch_enum.sh domains.txt
+
+# Parallel processing
+./batch_enum.sh domains.txt --parallel 3
+
+# With delay between scans
+./batch_enum.sh domains.txt --delay 60
+
+# Skip optional steps
+./batch_enum.sh domains.txt --skip-screenshots --skip-portscan
 ```
 
-## 📁 Output Locations
+### Analysis
 
-### Key Files
 ```bash
-# All subdomains
-cat results/*/subdomains/all_subdomains.txt
+# Analyze results
+python3 analyze_results.py results/example.com_20250122_123456/
 
-# Active HTTP hosts
-cat results/*/http/alive.txt
+# Summary only
+python3 analyze_results.py results/example.com_*/ --summary-only
 
-# All URLs
-cat results/*/urls/all_urls_clean.txt
-
-# Vulnerabilities
-cat results/*/vulnerabilities/nuclei.txt
-
-# Exposed Git repos
-cat results/*/git/exposed.txt
-
-# Final report
-cat results/*/reports/report.md
-
-# Changes from previous scan
-cat results/*/diff/*.diff
+# Export report
+python3 analyze_results.py results/example.com_*/ --export report.md
 ```
 
-## 🔍 Analysis Commands
+## 📊 One-Liners
 
-### Quick Stats
-```bash
-# Count subdomains
-wc -l results/*/subdomains/all_subdomains.txt
+### Find Interesting Assets
 
-# Count active hosts
-wc -l results/*/http/alive.txt
-
-# Count URLs
-wc -l results/*/urls/all_urls_clean.txt
-```
-
-### Find Interesting Data
 ```bash
 # Admin panels
-grep -i "admin\|panel\|dashboard" results/*/http/httpx.json
-
-# Development environments
-grep -i "dev\|staging\|test\|uat" results/*/subdomains/all_subdomains.txt
+grep -i "admin\|dashboard\|panel" results/*/http/httpx_full.json
 
 # API endpoints
-grep -i "api" results/*/urls/all_urls_clean.txt
+grep -i "api" results/*/urls/urls_clean.txt
 
-# Interesting parameters
-cat results/*/parameters/interesting.txt
+# Development environments
+grep -E "(dev|staging|test)" results/*/subdomains/all_subdomains.txt
+
+# Exposed Git
+cat results/*/git/exposed_git.txt
+
+# Cloud services
+cat results/*/cloud/*.txt
+
+# Vulnerabilities
+cat results/*/vulnerabilities/nuclei_results.txt
 ```
 
-## 🎯 Hunting Workflows
+### Extract Data
+
+```bash
+# All URLs with parameters
+grep '?' results/*/urls/urls_clean.txt
+
+# JavaScript files
+cat results/*/js/all_js_files.txt
+
+# Open ports
+cat results/*/ports/open_ports.txt
+
+# Status codes
+jq '.status_code' results/*/http/httpx_full.json | sort | uniq -c
+
+# Technologies
+jq '.tech[]' results/*/http/httpx_full.json | sort -u
+
+# Interesting parameters
+cat results/*/parameters/interesting_parameters.txt
+```
+
+### Vulnerability Hunting
+
+```bash
+# LFI/Path Traversal
+grep -E "(file=|path=|page=|include=)" results/*/urls/urls_clean.txt
+
+# SQL Injection
+grep -E "(id=|user=|product=|category=)" results/*/urls/urls_clean.txt
+
+# Open Redirect
+grep -E "(redirect=|url=|return=|next=)" results/*/urls/urls_clean.txt
+
+# SSRF
+grep -E "(url=|uri=|target=|dest=)" results/*/urls/urls_clean.txt
+
+# XSS
+grep -E "(search=|query=|q=|keyword=)" results/*/urls/urls_clean.txt
+```
+
+## 🎯 Workflows
 
 ### Bug Bounty Recon
+
 ```bash
-# Step 1: Fast passive scan
-python3 webenum.py -d target.com --skip-portscan --skip-screenshots --skip-vuln
+# Step 1: Passive scan
+python3 webenum.py -d target.com --skip-portscan --skip-screenshots
 
 # Step 2: Review findings
 cat results/target.com_*/reports/report.md
 
-# Step 3: Deep dive on interesting assets
-python3 webenum.py -d api.target.com --enable-fuzzing
+# Step 3: Deep dive
+python3 webenum.py -d api.target.com
 ```
 
-### Vulnerability Patterns
+### Red Team Assessment
 
-#### SSRF Candidates
 ```bash
-grep -E '(url=|uri=|target=|dest=|redirect=|proxy=)' results/*/urls/all_urls_clean.txt
+# Stealthy reconnaissance
+python3 webenum.py -d corp.com \
+    --skip-portscan \
+    --skip-screenshots \
+    --skip-vuln-scan
+
+# Check quick wins
+cat results/corp.com_*/git/exposed_git.txt
+grep "high\|critical" results/corp.com_*/vulnerabilities/nuclei_results.txt
 ```
 
-#### LFI/Path Traversal
+### Continuous Monitoring
+
 ```bash
-grep -E '(file=|path=|page=|include=|dir=|folder=)' results/*/urls/all_urls_clean.txt
-```
-
-#### SQL Injection
-```bash
-grep -E '(id=|user=|product=|category=|item=)' results/*/urls/all_urls_clean.txt
-```
-
-#### Open Redirect
-```bash
-grep -E '(redirect=|url=|return=|next=|callback=)' results/*/urls/all_urls_clean.txt
-```
-
-#### XSS Reflection
-```bash
-grep -E '(search=|query=|keyword=|q=|s=)' results/*/urls/all_urls_clean.txt
-```
-
-## 🛠️ Tool-Specific Commands
-
-### Subfinder (standalone)
-```bash
-subfinder -d example.com -all -o subdomains.txt
-```
-
-### HTTPx (standalone)
-```bash
-cat domains.txt | httpx -silent -tech-detect -status-code
-```
-
-### Nuclei (standalone)
-```bash
-cat urls.txt | nuclei -severity critical,high
-```
-
-### sdlookup (standalone)
-```bash
-sdlookup -d example.com
-```
-
-### katana (standalone)
-```bash
-katana -u https://example.com -depth 3 -js-crawl
-```
-
-### jsubfinder (standalone)
-```bash
-jsubfinder -f urls.txt
-```
-
-## 📊 Analysis Patterns
-
-### Technology Stack
-```bash
-# Extract technologies from httpx results
-jq '.tech[]' results/*/http/httpx.json | sort -u
-```
-
-### Status Codes
-```bash
-# Count status codes
-jq '.status_code' results/*/http/httpx.json | sort | uniq -c | sort -rn
-```
-
-### Port Summary
-```bash
-# View open ports
-cat results/*/ports/summary.txt
-```
-
-### Security Headers
-```bash
-# Check missing headers
-jq '.[] | select(.missing | length > 0)' results/*/http/security_headers.json
-```
-
-## 🔄 Continuous Monitoring
-
-### Cron Jobs
-```bash
-# Daily scan
+# Daily cron job
 0 2 * * * cd /opt/webenum && python3 webenum.py -d target.com --skip-screenshots
 
-# Weekly full scan
-0 3 * * 0 cd /opt/webenum && python3 webenum.py -d target.com
+# Check changes
+cat results/target.com_*/diff/*.diff
 
-# Check for new findings
-0 9 * * * cat /opt/webenum/results/target.com_*/diff/*.diff | mail -s "New Findings" you@example.com
+# Alert on new findings
+NEW=$(wc -l < results/target.com_*/diff/all_subdomains.txt.diff)
+[ "$NEW" -gt 0 ] && echo "New subdomains: $NEW"
+```
+
+## 🔧 Tool Integration
+
+### With Burp Suite
+
+```bash
+# Export for Burp
+cat results/*/urls/urls_clean.txt > burp_targets.txt
+```
+
+### With SQLMap
+
+```bash
+# Test SQL injection
+cat results/*/urls/urls_clean.txt | grep '?' | head -10 | while read url; do
+    sqlmap -u "$url" --batch --risk=2
+done
+```
+
+### With Dalfox
+
+```bash
+# Test XSS
+cat results/*/urls/urls_clean.txt | grep '?' | dalfox pipe
+```
+
+## 📈 Statistics
+
+### Count Results
+
+```bash
+# Subdomains
+wc -l results/*/subdomains/all_subdomains.txt
+
+# Active hosts
+wc -l results/*/http/alive.txt
+
+# URLs
+wc -l results/*/urls/urls_clean.txt
+
+# JS files
+wc -l results/*/js/all_js_files.txt
+
+# Vulnerabilities
+wc -l results/*/vulnerabilities/nuclei_results.txt
 ```
 
 ### Compare Scans
+
 ```bash
-# Find differences between two scans
-diff results/target.com_OLD/subdomains/all_subdomains.txt \
-     results/target.com_NEW/subdomains/all_subdomains.txt
+# Compare subdomains
+diff results/example.com_OLD/subdomains/all_subdomains.txt \
+     results/example.com_NEW/subdomains/all_subdomains.txt
+
+# New subdomains
+comm -13 results/example.com_OLD/subdomains/all_subdomains.txt \
+         results/example.com_NEW/subdomains/all_subdomains.txt
 ```
 
-## 💡 Pro Tips
+## 🛠️ Troubleshooting
 
-### 1. API Keys
+### Check Installation
+
 ```bash
-# Always configure API keys for better results
-python3 webenum.py --configure-api
-
-# Result: 50-200% more subdomains
-```
-
-### 2. Start Passive
-```bash
-# Begin with passive techniques
-python3 webenum.py -d target.com --skip-portscan --skip-screenshots
-```
-
-### 3. Review Diffs
-```bash
-# Always check changes
-cat results/*/diff/*.diff
-```
-
-### 4. Focus on High Value
-```bash
-# Look for admin/API endpoints
-grep -i "admin\|api\|portal" results/*/subdomains/all_subdomains.txt
-```
-
-### 5. Verify Manually
-```bash
-# Always verify automated findings
-# Don't rely solely on tool output
-```
-
-## 🐛 Debugging
-
-### Check Tool Availability
-```bash
+# Verify tools
 python3 webenum.py --check-tools
+
+# Check specific tool
+which subfinder httpx nuclei
+```
+
+### Fix Missing Tools
+
+```bash
+# Reinstall specific tool
+go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+
+# Reinstall all
+./install_tools.sh
 ```
 
 ### View Logs
+
 ```bash
-# Check scan logs
+# Real-time monitoring
 tail -f results/*/logs/*.log
+
+# Check for errors
+grep -i error results/*/logs/*.log
 ```
 
-### Test Individual Tools
-```bash
-# Test subfinder
-subfinder -d example.com -silent
+## 🎓 Pro Tips
 
-# Test httpx
-echo "https://example.com" | httpx -silent
-
-# Test nuclei
-nuclei -u https://example.com -silent
-```
-
-## 📦 Export Results
-
-### For Burp Suite
-```bash
-cat results/*/urls/all_urls_clean.txt > burp_targets.txt
-```
-
-### For Nmap
-```bash
-awk '{print $1}' results/*/dns/a_records.txt > nmap_targets.txt
-```
-
-### For Further Testing
-```bash
-# Active hosts
-cat results/*/http/alive.txt > active_hosts.txt
-
-# All subdomains
-cat results/*/subdomains/all_subdomains.txt > subdomains.txt
-```
-
-## ⚡ Performance
-
-### Speed Up Scans
-```bash
-# Skip time-consuming steps
-python3 webenum.py -d example.com \
-    --skip-screenshots \
-    --skip-portscan \
-    --skip-fuzzing \
-    --skip-vuln
-```
-
-### Limit Resources
-```bash
-# Limit memory (Linux)
-ulimit -m 4000000  # 4GB
-
-# Monitor resources
-watch -n 5 'ps aux | grep webenum'
-```
-
-## 🔒 Security
-
-### Scope Management
-```bash
-# Create scope file
-cat > scope.txt << EOF
-*.example.com
-!admin.example.com
-EOF
-
-# Filter results
-grep -f scope.txt results/*/subdomains/all_subdomains.txt
-```
-
-### Rate Limiting
-```bash
-# Use delays in batch processing
-./batch_enum.sh domains.txt --delay 60
-```
-
-## 📚 Integration Examples
-
-### With Other Tools
-
-#### Aquatone
-```bash
-cat results/*/http/alive.txt | aquatone
-```
-
-#### MassDNS
-```bash
-massdns -r resolvers.txt -o S -w resolved.txt results/*/subdomains/all_subdomains.txt
-```
-
-#### Gau + Nuclei
-```bash
-gau example.com | nuclei -t cves/
-```
-
-#### httpx + Nuclei
-```bash
-cat results/*/http/alive.txt | nuclei -severity critical,high
-```
-
-## 🎓 Learning Resources
-
-### Practice Targets
-- HackTheBox
-- PortSwigger Web Security Academy
-- TryHackMe
-- PentesterLab
-
-### Bug Bounty Platforms
-- HackerOne
-- Bugcrowd
-- Intigriti
-- YesWeHack
-
-## 🆘 Quick Help
+### API Keys
 
 ```bash
-# Help
-python3 webenum.py -h
-
-# Tool check
-python3 webenum.py --check-tools
-
-# API config
+# Always configure for better results
 python3 webenum.py --configure-api
+
+# Expect 50-200% more subdomains with APIs
 ```
+
+### Speed Optimization
+
+```bash
+# Skip time-consuming steps for fast scans
+python3 webenum.py -d target.com \
+    --skip-portscan \
+    --skip-vuln-scan \
+    --skip-screenshots
+```
+
+### Automated Monitoring
+
+```bash
+# Add to crontab
+crontab -e
+
+# Daily 2 AM scan
+0 2 * * * cd /opt/webenum && python3 webenum.py -d target.com --skip-screenshots >> /var/log/webenum.log 2>&1
+```
+
+### Diff Tracking
+
+```bash
+# Always review diff between scans
+cat results/target.com_*/diff/*.diff
+
+# Focus on new subdomains
+grep "^+" results/target.com_*/diff/all_subdomains.txt.diff
+```
+
+### Result Organization
+
+```bash
+# Archive old results
+tar -czf target.com_$(date +%Y%m).tar.gz results/target.com_*
+mv target.com_*.tar.gz archives/
+
+# Keep last 3 scans
+ls -dt results/target.com_* | tail -n +4 | xargs rm -rf
+```
+
+## 📚 Quick References
+
+### File Locations
+
+```
+~/.config/webenum/api_keys.json    # API keys
+~/.config/webenum/wordlists/       # Wordlists
+./results/                          # Scan results
+./batch_logs/                       # Batch processing logs
+```
+
+### Important Files
+
+```
+results/*/reports/report.md         # Main report
+results/*/subdomains/all_subdomains.txt
+results/*/http/alive.txt
+results/*/urls/urls_clean.txt
+results/*/vulnerabilities/nuclei_results.txt
+results/*/git/exposed_git.txt
+results/*/diff/*.diff               # Changes from last scan
+```
+
+### Output Formats
+
+```
+.txt  - Plain text lists
+.json - JSON structured data
+.md   - Markdown reports
+.diff - Difference from previous scan
+```
+
+## ⚠️ Remember
+
+1. **Always get permission** before scanning
+2. **Configure API keys** for better results
+3. **Review diff output** to track changes
+4. **Start passive** then go active
+5. **Combine tools** for best coverage
+6. **Verify findings** manually
+7. **Document everything**
+
+## 🔗 Resources
+
+- **Documentation**: README.md
+- **Tool Check**: `python3 webenum.py --check-tools`
+- **API Setup**: `python3 webenum.py --configure-api`
+- **Help**: `python3 webenum.py --help`
 
 ---
-
-**Remember:**
-1. Always get authorization
-2. Start passive, then active
-3. Use API keys
-4. Review diffs regularly
-5. Verify findings manually
 
 **Happy Hunting! 🎯**

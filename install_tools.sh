@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # ============================================================================
-# WebEnum Tool Installation Script
-# Cross-platform support: macOS and Debian/Kali
+# WebEnum - Tools Installation Script
+# Cross-platform support for macOS and Debian/Kali Linux
 # ============================================================================
 
 set -e
@@ -14,6 +14,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
+# Helper functions
 info() { echo -e "${BLUE}[*]${NC} $1"; }
 success() { echo -e "${GREEN}[+]${NC} $1"; }
 warning() { echo -e "${YELLOW}[!]${NC} $1"; }
@@ -24,6 +25,7 @@ header() { echo -e "\n${BLUE}========================================${NC}"; ech
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m)
 
+# Check if command exists
 command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
@@ -31,28 +33,29 @@ command_exists() {
 # Check Go
 check_go() {
     if ! command_exists go; then
-        error "Go not installed!"
+        error "Go is not installed!"
         echo ""
+        echo "Install Go first:"
         if [ "$OS" = "darwin" ]; then
-            echo "Install: brew install go"
+            echo "  brew install go"
         else
-            echo "Install: sudo apt install golang-go"
+            echo "  Ubuntu/Debian: sudo apt install golang-go"
+            echo "  Or: https://go.dev/dl/"
         fi
-        echo "Or download from: https://go.dev/dl/"
         exit 1
     fi
-    
+
     GO_VERSION=$(go version | awk '{print $3}' | sed 's/go//')
     success "Go $GO_VERSION detected"
 }
 
-# Check Python
+# Check Python3
 check_python() {
     if ! command_exists python3; then
-        error "Python3 not installed!"
+        error "Python3 is not installed!"
         exit 1
     fi
-    
+
     PYTHON_VERSION=$(python3 --version | awk '{print $2}')
     success "Python $PYTHON_VERSION detected"
 }
@@ -61,12 +64,12 @@ check_python() {
 install_go_tool() {
     local package=$1
     local name=$2
-    
+
     if command_exists "$name"; then
         warning "$name already installed"
         return 0
     fi
-    
+
     info "Installing $name..."
     if go install -v "$package@latest" 2>/dev/null; then
         success "$name installed"
@@ -81,21 +84,62 @@ install_go_tool() {
 install_python_tool() {
     local package=$1
     local name=$2
-    
+
     if command_exists "$name" || python3 -c "import $package" 2>/dev/null; then
         warning "$name already installed"
         return 0
     fi
-    
+
     info "Installing $name via pip..."
     
-    if python3 -m pip install --user "$package" 2>/dev/null || pip3 install --user "$package" 2>/dev/null; then
+    if command_exists pipx && pipx install "$package" 2>/dev/null; then
+        success "$name installed via pipx"
+        return 0
+    elif python3 -m pip install --user "$package" 2>/dev/null; then
         success "$name installed"
         return 0
     else
         error "Failed to install $name"
         return 1
     fi
+}
+
+# Install massdns
+install_massdns() {
+    if command_exists massdns; then
+        warning "massdns already installed"
+        return 0
+    fi
+
+    info "Installing massdns..."
+
+    if [ "$OS" = "darwin" ]; then
+        if command_exists brew; then
+            if brew install massdns 2>/dev/null; then
+                success "massdns installed via Homebrew"
+                return 0
+            fi
+        fi
+    fi
+
+    # Compile from source
+    info "Compiling from source..."
+    TMP_DIR=$(mktemp -d)
+    cd "$TMP_DIR"
+
+    if git clone https://github.com/blechschmidt/massdns 2>/dev/null; then
+        cd massdns
+        if make 2>/dev/null; then
+            if sudo make install 2>/dev/null; then
+                success "massdns installed to /usr/local/bin"
+            elif cp bin/massdns "$GOPATH/bin/" 2>/dev/null; then
+                success "massdns installed to $GOPATH/bin"
+            else
+                warning "Could not move massdns to PATH"
+            fi
+        fi
+    fi
+    cd - >/dev/null
 }
 
 # Install system packages
@@ -105,25 +149,23 @@ install_system_packages() {
     if [ "$OS" = "darwin" ]; then
         if command_exists brew; then
             info "Installing via Homebrew..."
-            brew install git wget curl jq 2>/dev/null || warning "Some packages may have failed"
-        else
-            warning "Homebrew not found"
-            info "Install: /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+            brew install git curl wget jq 2>/dev/null || true
         fi
     else
         info "Installing system packages..."
         if command_exists apt; then
-            sudo apt update && sudo apt install -y git wget curl jq build-essential 2>/dev/null || warning "Some packages may have failed"
+            sudo apt update && sudo apt install -y git curl wget jq python3-pip 2>/dev/null || true
         elif command_exists dnf; then
-            sudo dnf install -y git wget curl jq gcc make 2>/dev/null || warning "Some packages may have failed"
-        elif command_exists yum; then
-            sudo yum install -y git wget curl jq gcc make 2>/dev/null || warning "Some packages may have failed"
+            sudo dnf install -y git curl wget jq python3-pip 2>/dev/null || true
         fi
     fi
 }
 
-# Main
-header "WEBENUM TOOL INSTALLER"
+# ============================================================================
+# MAIN
+# ============================================================================
+
+header "WEBENUM - TOOLS INSTALLATION"
 
 info "OS: $OS ($ARCH)"
 
@@ -154,7 +196,7 @@ if ! grep -q 'export PATH=$PATH:$(go env GOPATH)/bin' "$SHELL_CONFIG" 2>/dev/nul
     echo '' >> "$SHELL_CONFIG"
     echo '# Go binaries' >> "$SHELL_CONFIG"
     echo 'export PATH=$PATH:$(go env GOPATH)/bin' >> "$SHELL_CONFIG"
-    success "PATH configured"
+    success "PATH configured in $SHELL_CONFIG"
 fi
 
 # Python user bin
@@ -173,21 +215,21 @@ fi
 install_system_packages
 
 # ============================================================================
-# SUBDOMAIN ENUMERATION
+# CORE SUBDOMAIN ENUMERATION
 # ============================================================================
 
-header "SUBDOMAIN TOOLS"
+header "SUBDOMAIN ENUMERATION TOOLS"
 
 install_go_tool "github.com/projectdiscovery/subfinder/v2/cmd/subfinder" "subfinder"
 install_go_tool "github.com/tomnomnom/assetfinder" "assetfinder"
-install_go_tool "github.com/projectdiscovery/chaos-client/cmd/chaos" "chaos"
+install_go_tool "github.com/owasp-amass/amass/v4/...@master" "amass"
 
 # Findomain
 if ! command_exists findomain; then
     info "Installing findomain..."
     
     if [ "$OS" = "darwin" ] && command_exists brew; then
-        brew install findomain 2>/dev/null && success "findomain installed via Homebrew"
+        brew install findomain 2>/dev/null && success "findomain installed"
     else
         case "$ARCH" in
             x86_64) FINDOMAIN_ARCH="amd64" ;;
@@ -196,7 +238,6 @@ if ! command_exists findomain; then
         esac
         
         FINDOMAIN_URL="https://github.com/Findomain/Findomain/releases/latest/download/findomain-${OS}-${FINDOMAIN_ARCH}.zip"
-        
         TMP_DIR=$(mktemp -d)
         cd "$TMP_DIR"
         
@@ -207,17 +248,19 @@ if ! command_exists findomain; then
             if sudo mv findomain /usr/local/bin/ 2>/dev/null; then
                 success "findomain installed"
             elif mv findomain "$GOPATH/bin/" 2>/dev/null; then
-                success "findomain installed"
+                success "findomain installed to $GOPATH/bin"
             fi
         fi
-        
         cd - >/dev/null
         rm -rf "$TMP_DIR"
     fi
 fi
 
-# Amass
-install_go_tool "github.com/owasp-amass/amass/v4/...@master" "amass"
+# Knock
+if ! command_exists knockpy; then
+    info "Installing knock..."
+    python3 -m pip install --user knockpy 2>/dev/null && success "knock installed" || warning "knock install failed"
+fi
 
 # ============================================================================
 # DNS TOOLS
@@ -227,113 +270,62 @@ header "DNS TOOLS"
 
 install_go_tool "github.com/projectdiscovery/dnsx/cmd/dnsx" "dnsx"
 install_go_tool "github.com/d3mondev/puredns/v2" "puredns"
-install_go_tool "github.com/projectdiscovery/shuffledns/cmd/shuffledns" "shuffledns"
-
-# massdns
-if ! command_exists massdns; then
-    info "Installing massdns..."
-    
-    if [ "$OS" = "darwin" ] && command_exists brew; then
-        brew install massdns 2>/dev/null && success "massdns installed"
-    else
-        TMP_DIR=$(mktemp -d)
-        cd "$TMP_DIR"
-        
-        if git clone https://github.com/blechschmidt/massdns 2>/dev/null; then
-            cd massdns
-            make 2>/dev/null && sudo make install 2>/dev/null && success "massdns installed"
-        fi
-        
-        cd - >/dev/null
-        rm -rf "$TMP_DIR"
-    fi
-fi
+install_go_tool "github.com/vortexau/dnsvalidator" "dnsvalidator"
+install_massdns
 
 # ============================================================================
 # HTTP PROBING
 # ============================================================================
 
-header "HTTP PROBING"
+header "HTTP PROBING TOOLS"
 
 install_go_tool "github.com/projectdiscovery/httpx/cmd/httpx" "httpx"
 install_go_tool "github.com/hakluke/hakcheckurl" "hakcheckurl"
 install_go_tool "github.com/sensepost/gowitness" "gowitness"
 
 # ============================================================================
-# PORT SCANNING
-# ============================================================================
-
-header "PORT SCANNING"
-
-# sdlookup (uses Shodan internetdb)
-install_go_tool "github.com/j3ssie/sdlookup" "sdlookup"
-
-# ============================================================================
 # URL COLLECTION
 # ============================================================================
 
-header "URL COLLECTION"
+header "URL COLLECTION TOOLS"
 
-# xurlfind3r (modern URL finder)
 install_go_tool "github.com/hueristiq/xurlfind3r/cmd/xurlfind3r" "xurlfind3r"
-
-# katana (modern web crawler)
-install_go_tool "github.com/projectdiscovery/katana/cmd/katana" "katana"
-
-# gospider
-install_go_tool "github.com/jaeles-project/gospider" "gospider"
-
-# Traditional tools
 install_go_tool "github.com/lc/gau/v2/cmd/gau" "gau"
 install_go_tool "github.com/tomnomnom/waybackurls" "waybackurls"
+install_go_tool "github.com/hakluke/hakrawler" "hakrawler"
+install_go_tool "github.com/tomnomnom/meg" "meg"
+
+# Photon
+if ! command_exists photon; then
+    info "Installing Photon..."
+    python3 -m pip install --user photon-python 2>/dev/null && success "Photon installed" || warning "Photon install failed"
+fi
 
 # ============================================================================
 # JAVASCRIPT ANALYSIS
 # ============================================================================
 
-header "JAVASCRIPT TOOLS"
+header "JAVASCRIPT ANALYSIS TOOLS"
 
-# jsubfinder (finds subdomains in JS)
+install_go_tool "github.com/lc/subjs" "subjs"
+install_go_tool "github.com/003random/getJS" "getJS"
+
+# jsubfinder
 if ! command_exists jsubfinder; then
     info "Installing jsubfinder..."
-    
     TMP_DIR=$(mktemp -d)
     cd "$TMP_DIR"
     
-    if git clone https://github.com/ThreatUnkn0wn/jsubfinder 2>/dev/null; then
+    if git clone https://github.com/ThreatUnknown/jsubfinder 2>/dev/null; then
         cd jsubfinder
-        
-        if [ "$OS" = "darwin" ]; then
-            chmod +x install_darwin.sh
-            ./install_darwin.sh 2>/dev/null && success "jsubfinder installed"
-        else
-            chmod +x install.sh
-            ./install.sh 2>/dev/null && success "jsubfinder installed"
+        if go build 2>/dev/null; then
+            if sudo mv jsubfinder /usr/local/bin/ 2>/dev/null; then
+                success "jsubfinder installed"
+            elif mv jsubfinder "$GOPATH/bin/" 2>/dev/null; then
+                success "jsubfinder installed to $GOPATH/bin"
+            fi
         fi
     fi
-    
-    cd - >/dev/null
-    rm -rf "$TMP_DIR"
-fi
-
-# subjs
-install_go_tool "github.com/lc/subjs" "subjs"
-
-# getallurls
-install_go_tool "github.com/lc/gau/v2/cmd/gau" "getallurls"
-
-# LinkFinder
-if ! command_exists linkfinder; then
-    info "Installing LinkFinder..."
-    
-    TMP_DIR=$(mktemp -d)
-    cd "$TMP_DIR"
-    
-    if git clone https://github.com/GerbenJavado/LinkFinder 2>/dev/null; then
-        cd LinkFinder
-        python3 setup.py install --user 2>/dev/null && success "LinkFinder installed"
-    fi
-    
     cd - >/dev/null
     rm -rf "$TMP_DIR"
 fi
@@ -342,137 +334,106 @@ fi
 # UTILITIES
 # ============================================================================
 
-header "UTILITIES"
+header "UTILITY TOOLS"
 
 install_go_tool "github.com/tomnomnom/anew" "anew"
-install_python_tool "uro" "uro"
 install_go_tool "github.com/tomnomnom/unfurl" "unfurl"
 install_go_tool "github.com/tomnomnom/qsreplace" "qsreplace"
 install_go_tool "github.com/takshal/freq" "freq"
+
+# uro
+if ! command_exists uro; then
+    info "Installing uro..."
+    python3 -m pip install --user uro 2>/dev/null && success "uro installed" || warning "uro install failed"
+fi
+
+# ============================================================================
+# SCANNING TOOLS
+# ============================================================================
+
+header "SCANNING TOOLS"
+
+install_go_tool "github.com/projectdiscovery/nuclei/v3/cmd/nuclei" "nuclei"
+
+# Update Nuclei templates
+if command_exists nuclei; then
+    info "Updating Nuclei templates..."
+    nuclei -update-templates 2>/dev/null || true
+    success "Nuclei templates updated"
+fi
+
+# sdlookup
+if ! command_exists sdlookup; then
+    info "Installing sdlookup..."
+    TMP_DIR=$(mktemp -d)
+    cd "$TMP_DIR"
+    
+    if git clone https://github.com/j3ssie/sdlookup 2>/dev/null; then
+        cd sdlookup
+        if go build 2>/dev/null; then
+            if sudo mv sdlookup /usr/local/bin/ 2>/dev/null; then
+                success "sdlookup installed"
+            elif mv sdlookup "$GOPATH/bin/" 2>/dev/null; then
+                success "sdlookup installed to $GOPATH/bin"
+            fi
+        fi
+    fi
+    cd - >/dev/null
+    rm -rf "$TMP_DIR"
+fi
 
 # ============================================================================
 # GIT TOOLS
 # ============================================================================
 
-header "GIT TOOLS"
+header "GIT DUMPING TOOLS"
 
-# goop (git dumper)
-install_go_tool "github.com/deletescape/goop" "goop"
-
-# trufflehog (secret scanner)
-if ! command_exists trufflehog; then
-    info "Installing trufflehog..."
+# goop
+if ! command_exists goop; then
+    info "Installing goop..."
+    TMP_DIR=$(mktemp -d)
+    cd "$TMP_DIR"
     
-    if [ "$OS" = "darwin" ] && command_exists brew; then
-        brew install trufflehog 2>/dev/null && success "trufflehog installed"
-    else
-        # Install from GitHub releases
-        TMP_DIR=$(mktemp -d)
-        cd "$TMP_DIR"
-        
-        case "$OS" in
-            linux)
-                if [ "$ARCH" = "x86_64" ]; then
-                    TRUFFLEHOG_URL="https://github.com/trufflesecurity/trufflehog/releases/latest/download/trufflehog_3.63.7_linux_amd64.tar.gz"
-                fi
-                ;;
-        esac
-        
-        if [ -n "$TRUFFLEHOG_URL" ]; then
-            wget -q "$TRUFFLEHOG_URL" -O trufflehog.tar.gz 2>/dev/null || curl -sL "$TRUFFLEHOG_URL" -o trufflehog.tar.gz
-            tar -xzf trufflehog.tar.gz
-            chmod +x trufflehog
-            sudo mv trufflehog /usr/local/bin/ 2>/dev/null || mv trufflehog "$GOPATH/bin/"
-            success "trufflehog installed"
+    if git clone https://github.com/nyancrimew/goop 2>/dev/null; then
+        cd goop
+        if go build 2>/dev/null; then
+            if sudo mv goop /usr/local/bin/ 2>/dev/null; then
+                success "goop installed"
+            elif mv goop "$GOPATH/bin/" 2>/dev/null; then
+                success "goop installed to $GOPATH/bin"
+            fi
         fi
-        
-        cd - >/dev/null
-        rm -rf "$TMP_DIR"
     fi
+    cd - >/dev/null
+    rm -rf "$TMP_DIR"
 fi
 
 # git-dumper
 if ! command_exists git-dumper; then
     info "Installing git-dumper..."
-    install_python_tool "git-dumper" "git-dumper"
+    python3 -m pip install --user git-dumper 2>/dev/null && success "git-dumper installed" || warning "git-dumper install failed"
 fi
-
-# ============================================================================
-# VULNERABILITY SCANNING
-# ============================================================================
-
-header "VULNERABILITY SCANNING"
-
-# nuclei
-install_go_tool "github.com/projectdiscovery/nuclei/v3/cmd/nuclei" "nuclei"
-
-if command_exists nuclei; then
-    info "Updating Nuclei templates..."
-    nuclei -update-templates 2>/dev/null || true
-fi
-
-# jaeles
-install_go_tool "github.com/jaeles-project/jaeles" "jaeles"
-
-# nikto
-if ! command_exists nikto; then
-    info "Installing nikto..."
-    
-    if [ "$OS" = "darwin" ] && command_exists brew; then
-        brew install nikto 2>/dev/null
-    elif command_exists apt; then
-        sudo apt install -y nikto 2>/dev/null
-    fi
-fi
-
-# ============================================================================
-# FUZZING TOOLS
-# ============================================================================
-
-header "FUZZING TOOLS"
-
-install_go_tool "github.com/ffuf/ffuf/v2" "ffuf"
-install_go_tool "github.com/epi052/feroxbuster" "feroxbuster"
-install_go_tool "github.com/OJ/gobuster/v3" "gobuster"
 
 # ============================================================================
 # PARAMETER DISCOVERY
 # ============================================================================
 
-header "PARAMETER DISCOVERY"
+header "PARAMETER DISCOVERY TOOLS"
 
-install_python_tool "arjun" "arjun"
-
-# x8 (hidden parameter discovery)
-if ! command_exists x8; then
-    info "Installing x8..."
-    
-    if command_exists cargo; then
-        cargo install x8 2>/dev/null && success "x8 installed"
-    else
-        warning "Rust/cargo not found, skipping x8"
-    fi
+# Arjun
+if ! command_exists arjun; then
+    info "Installing arjun..."
+    python3 -m pip install --user arjun 2>/dev/null && success "arjun installed" || warning "arjun install failed"
 fi
 
 # ============================================================================
-# TECHNOLOGY DETECTION
+# TAKEOVER DETECTION
 # ============================================================================
 
-header "TECHNOLOGY DETECTION"
+header "TAKEOVER DETECTION TOOLS"
 
-# webanalyze
-install_go_tool "github.com/rverton/webanalyze/cmd/webanalyze" "webanalyze"
-
-# retire.js
-if ! command_exists retire; then
-    info "Installing retire.js..."
-    
-    if command_exists npm; then
-        npm install -g retire 2>/dev/null && success "retire.js installed"
-    else
-        warning "npm not found, skipping retire.js"
-    fi
-fi
+install_go_tool "github.com/PentestPad/subzy" "subzy"
+install_go_tool "github.com/haccer/subjack" "subjack"
 
 # ============================================================================
 # OPTIONAL TOOLS
@@ -482,13 +443,54 @@ header "OPTIONAL TOOLS"
 
 read -p "$(echo -e ${YELLOW}Install optional tools? [y/N]: ${NC})" -n 1 -r
 echo
-
 if [[ $REPLY =~ ^[Yy]$ ]]; then
-    install_go_tool "github.com/projectdiscovery/naabu/v2/cmd/naabu" "naabu"
-    install_go_tool "github.com/PentestPad/subzy" "subzy"
-    install_go_tool "github.com/haccer/subjack" "subjack"
     install_go_tool "github.com/hahwul/dalfox/v2" "dalfox"
-    install_go_tool "github.com/projectdiscovery/notify/cmd/notify" "notify"
+    
+    if ! command_exists sqlmap; then
+        if [ "$OS" = "darwin" ] && command_exists brew; then
+            brew install sqlmap 2>/dev/null
+        else
+            python3 -m pip install --user sqlmap 2>/dev/null
+        fi
+    fi
+fi
+
+# ============================================================================
+# WORDLISTS
+# ============================================================================
+
+header "WORDLISTS"
+
+WORDLIST_DIR="$HOME/.config/webenum/wordlists"
+
+if [ ! -d "$WORDLIST_DIR" ]; then
+    read -p "$(echo -e ${YELLOW}Download wordlists? [y/N]: ${NC})" -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        mkdir -p "$WORDLIST_DIR"
+        
+        info "Downloading wordlists..."
+        
+        # Subdomain wordlist
+        if [ ! -f "$WORDLIST_DIR/subdomains-top1m.txt" ]; then
+            wget -q https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/DNS/subdomains-top1million-110000.txt \
+                -O "$WORDLIST_DIR/subdomains-top1m.txt" 2>/dev/null || \
+            curl -sL https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/DNS/subdomains-top1million-110000.txt \
+                -o "$WORDLIST_DIR/subdomains-top1m.txt"
+            success "Subdomain wordlist downloaded"
+        fi
+        
+        # Common paths
+        if [ ! -f "$WORDLIST_DIR/common.txt" ]; then
+            wget -q https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt \
+                -O "$WORDLIST_DIR/common.txt" 2>/dev/null || \
+            curl -sL https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt \
+                -o "$WORDLIST_DIR/common.txt"
+            success "Common wordlist downloaded"
+        fi
+        
+        success "Wordlists saved to $WORDLIST_DIR"
+    fi
 fi
 
 # ============================================================================
@@ -511,46 +513,14 @@ python3 -m pip install --user -r /tmp/webenum_requirements.txt 2>/dev/null || wa
 rm /tmp/webenum_requirements.txt
 
 # ============================================================================
-# WORDLISTS
-# ============================================================================
-
-header "WORDLISTS"
-
-WORDLIST_DIR="$HOME/.config/webenum/wordlists"
-
-if [ ! -d "$WORDLIST_DIR" ]; then
-    read -p "$(echo -e ${YELLOW}Download wordlists? [y/N]: ${NC})" -n 1 -r
-    echo
-    
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        mkdir -p "$WORDLIST_DIR"
-        
-        info "Downloading wordlists..."
-        
-        # Subdomain wordlist
-        wget -q https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/DNS/subdomains-top1million-110000.txt \
-            -O "$WORDLIST_DIR/subdomains.txt" 2>/dev/null || \
-        curl -sL https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/DNS/subdomains-top1million-110000.txt \
-            -o "$WORDLIST_DIR/subdomains.txt"
-        
-        # Directory wordlist
-        wget -q https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt \
-            -O "$WORDLIST_DIR/common.txt" 2>/dev/null || \
-        curl -sL https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt \
-            -o "$WORDLIST_DIR/common.txt"
-        
-        success "Wordlists: $WORDLIST_DIR"
-    fi
-fi
-
-# ============================================================================
-# VERIFICATION
+# FINAL VERIFICATION
 # ============================================================================
 
 header "VERIFICATION"
 
 CRITICAL_TOOLS=("subfinder" "httpx" "dnsx")
-RECOMMENDED_TOOLS=("xurlfind3r" "katana" "sdlookup" "jsubfinder" "nuclei")
+RECOMMENDED_TOOLS=("puredns" "massdns" "xurlfind3r" "nuclei" "sdlookup")
+OPTIONAL_TOOLS=("gowitness" "arjun" "subzy" "dalfox")
 
 info "Verifying installation..."
 echo ""
@@ -570,7 +540,17 @@ for tool in "${RECOMMENDED_TOOLS[@]}"; do
     if command_exists "$tool"; then
         echo -e "  ${GREEN}✓${NC} $tool"
     else
-        echo -e "  ${YELLOW}○${NC} $tool (optional)"
+        echo -e "  ${YELLOW}✗${NC} $tool"
+    fi
+done
+
+echo ""
+echo "Optional Tools:"
+for tool in "${OPTIONAL_TOOLS[@]}"; do
+    if command_exists "$tool"; then
+        echo -e "  ${GREEN}✓${NC} $tool"
+    else
+        echo -e "  ${YELLOW}○${NC} $tool (not installed)"
     fi
 done
 
@@ -581,6 +561,6 @@ warning "IMPORTANT: Run 'source $SHELL_CONFIG' or open a new terminal"
 echo ""
 info "Next steps:"
 echo "  1. Configure API keys: python3 webenum.py --configure-api"
-echo "  2. Check tools: python3 webenum.py --check-tools"
-echo "  3. Run scan: python3 webenum.py -d example.com"
+echo "  2. Verify tools: python3 webenum.py --check-tools"
+echo "  3. Run first scan: python3 webenum.py -d example.com"
 echo ""
