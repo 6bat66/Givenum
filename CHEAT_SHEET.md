@@ -8,10 +8,10 @@ chmod +x install_tools.sh
 ./install_tools.sh
 
 # Configure API keys
-python3 webenum.py --configure-api
+python3 GivEnum.py --configure-api
 
 # Verify installation
-python3 webenum.py --check-tools
+python3 GivEnum.py --check-tools
 ```
 
 ## ⚡ Common Commands
@@ -19,18 +19,38 @@ python3 webenum.py --check-tools
 ### Basic Scans
 
 ```bash
-# Standard scan
-python3 webenum.py -d example.com
+# Passive scan (default) — subdomain discovery, HTTP, URLs, JS, git, takeover
+python3 GivEnum.py -d example.com
 
-# Fast scan (skip optional)
-python3 webenum.py -d example.com --skip-screenshots --skip-portscan
+# Active scan — adds brute-force, port scan, nuclei, dalfox (XSS), subjack, arjun
+python3 GivEnum.py -d example.com --active
 
-# Skip vulnerability scan
-python3 webenum.py -d example.com --skip-vuln-scan
+# Active but skip heavy steps
+python3 GivEnum.py -d example.com --active --skip-screenshots --skip-portscan
 
-# Custom output
-python3 webenum.py -d example.com -o /path/to/output
+# Active but skip vuln scan (nuclei + dalfox)
+python3 GivEnum.py -d example.com --active --skip-vuln-scan
+
+# Custom output directory
+python3 GivEnum.py -d example.com -o /path/to/output
 ```
+
+### Passive vs Active Mode
+
+| Feature | Passive (default) | Active (`--active`) |
+|---|:---:|:---:|
+| Subdomain discovery (passive APIs) | ✓ | ✓ |
+| DNS resolution + HTTP probing | ✓ | ✓ |
+| Screenshots (gowitness) | ✓ | ✓ |
+| URL collection (gau, waybackurls, hakrawler) | ✓ | ✓ |
+| JS analysis + git exposure | ✓ | ✓ |
+| Takeover check (subzy) | ✓ | ✓ |
+| **DNS brute-force (puredns + wordlist)** | — | ✓ |
+| **Port scan (sdlookup/Shodan)** | — | ✓ |
+| **Vulnerability scan (nuclei)** | — | ✓ |
+| **XSS scan (dalfox)** | — | ✓ |
+| **Parameter discovery (arjun)** | — | ✓ |
+| **Takeover check (subjack)** | — | ✓ |
 
 ### Batch Processing
 
@@ -131,35 +151,47 @@ grep -E "(search=|query=|q=|keyword=)" results/*/urls/urls_clean.txt
 ### Bug Bounty Recon
 
 ```bash
-# Step 1: Passive scan
-python3 webenum.py -d target.com --skip-portscan --skip-screenshots
+# Step 1: Passive recon (fast, no noise)
+python3 GivEnum.py -d target.com
 
 # Step 2: Review findings
 cat results/target.com_*/reports/report.md
+python3 analyze_results.py results/target.com_*/
 
-# Step 3: Deep dive
-python3 webenum.py -d api.target.com
+# Step 3: Active scan on interesting targets
+python3 GivEnum.py -d api.target.com --active
+python3 GivEnum.py -d admin.target.com --active --skip-portscan
+
+# Step 4: Review active findings
+cat results/target.com_*/vulnerabilities/nuclei_results.txt
+cat results/target.com_*/vulnerabilities/dalfox_results.txt
+cat results/target.com_*/takeover/subjack_results.txt
 ```
 
 ### Red Team Assessment
 
 ```bash
-# Stealthy reconnaissance
-python3 webenum.py -d corp.com \
-    --skip-portscan \
-    --skip-screenshots \
-    --skip-vuln-scan
+# Stealthy passive reconnaissance
+python3 GivEnum.py -d corp.com
 
 # Check quick wins
 cat results/corp.com_*/git/exposed_git.txt
+cat results/corp.com_*/takeover/subzy_results.json
+
+# Full active assessment (authorized)
+python3 GivEnum.py -d corp.com --active
+
+# Review all active findings
 grep "high\|critical" results/corp.com_*/vulnerabilities/nuclei_results.txt
+cat results/corp.com_*/vulnerabilities/dalfox_results.txt
+cat results/corp.com_*/ports/open_ports.txt
 ```
 
 ### Continuous Monitoring
 
 ```bash
 # Daily cron job
-0 2 * * * cd /opt/webenum && python3 webenum.py -d target.com --skip-screenshots
+0 2 * * * cd /opt/webenum && python3 GivEnum.py -d target.com --skip-screenshots
 
 # Check changes
 cat results/target.com_*/diff/*.diff
@@ -233,7 +265,7 @@ comm -13 results/example.com_OLD/subdomains/all_subdomains.txt \
 
 ```bash
 # Verify tools
-python3 webenum.py --check-tools
+python3 GivEnum.py --check-tools
 
 # Check specific tool
 which subfinder httpx nuclei
@@ -265,7 +297,7 @@ grep -i error results/*/logs/*.log
 
 ```bash
 # Always configure for better results
-python3 webenum.py --configure-api
+python3 GivEnum.py --configure-api
 
 # Expect 50-200% more subdomains with APIs
 ```
@@ -274,7 +306,7 @@ python3 webenum.py --configure-api
 
 ```bash
 # Skip time-consuming steps for fast scans
-python3 webenum.py -d target.com \
+python3 GivEnum.py -d target.com \
     --skip-portscan \
     --skip-vuln-scan \
     --skip-screenshots
@@ -287,7 +319,7 @@ python3 webenum.py -d target.com \
 crontab -e
 
 # Daily 2 AM scan
-0 2 * * * cd /opt/webenum && python3 webenum.py -d target.com --skip-screenshots >> /var/log/webenum.log 2>&1
+0 2 * * * cd /opt/webenum && python3 GivEnum.py -d target.com --skip-screenshots >> /var/log/webenum.log 2>&1
 ```
 
 ### Diff Tracking
@@ -316,8 +348,8 @@ ls -dt results/target.com_* | tail -n +4 | xargs rm -rf
 ### File Locations
 
 ```
-~/.config/webenum/api_keys.json    # API keys
-~/.config/webenum/wordlists/       # Wordlists
+~/.config/givenum/api_keys.json    # API keys
+~/.config/givenum/wordlists/       # Wordlists
 ./results/                          # Scan results
 ./batch_logs/                       # Batch processing logs
 ```
@@ -325,13 +357,19 @@ ls -dt results/target.com_* | tail -n +4 | xargs rm -rf
 ### Important Files
 
 ```
-results/*/reports/report.md         # Main report
-results/*/subdomains/all_subdomains.txt
-results/*/http/alive.txt
-results/*/urls/urls_clean.txt
-results/*/vulnerabilities/nuclei_results.txt
-results/*/git/exposed_git.txt
-results/*/diff/*.diff               # Changes from last scan
+results/*/reports/report.md                     # Main report
+results/*/subdomains/all_subdomains.txt          # All subdomains (passive)
+results/*/subdomains/bruteforce.txt              # Brute-forced subdomains (--active)
+results/*/http/alive.txt                         # Active HTTP hosts
+results/*/urls/urls_clean.txt                    # Deduplicated URLs
+results/*/ports/open_ports.txt                   # Open ports (--active)
+results/*/vulnerabilities/nuclei_results.txt     # Nuclei findings (--active)
+results/*/vulnerabilities/dalfox_results.txt     # XSS findings (--active)
+results/*/takeover/subzy_results.json            # Takeover check (passive)
+results/*/takeover/subjack_results.txt           # Takeover check (--active)
+results/*/git/exposed_git.txt                    # Exposed .git dirs
+results/*/parameters/interesting_parameters.txt  # Interesting URL params
+results/*/diff/*.diff                            # Changes from last scan
 ```
 
 ### Output Formats
@@ -356,9 +394,9 @@ results/*/diff/*.diff               # Changes from last scan
 ## 🔗 Resources
 
 - **Documentation**: README.md
-- **Tool Check**: `python3 webenum.py --check-tools`
-- **API Setup**: `python3 webenum.py --configure-api`
-- **Help**: `python3 webenum.py --help`
+- **Tool Check**: `python3 GivEnum.py --check-tools`
+- **API Setup**: `python3 GivEnum.py --configure-api`
+- **Help**: `python3 GivEnum.py --help`
 
 ---
 

@@ -22,7 +22,7 @@ error() { echo -e "${RED}[-]${NC} $1"; }
 header() { echo -e "\n${CYAN}========================================${NC}"; echo -e "${CYAN}$1${NC}"; echo -e "${CYAN}========================================${NC}\n"; }
 
 # Default settings
-WEBENUM_SCRIPT="./webenum.py"
+WEBENUM_SCRIPT="./GivEnum.py"
 LOG_DIR="./batch_logs"
 RESULTS_SUMMARY="${LOG_DIR}/batch_summary.txt"
 FAILED_DOMAINS="${LOG_DIR}/failed_domains.txt"
@@ -177,14 +177,18 @@ process_domain() {
     header "[$job_num/$TOTAL] $domain"
     
     # Check if already processed
-    if [ -d "${OUTPUT_DIR}/${domain}_"* ] 2>/dev/null; then
+    if compgen -G "${OUTPUT_DIR}/${domain}_*" > /dev/null; then
         local existing=$(ls -dt "${OUTPUT_DIR}/${domain}_"* 2>/dev/null | head -1)
         warning "Previous scan: $existing"
-        read -p "$(echo -e ${YELLOW}Skip? [Y/n]: ${NC})" -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Nn]$ ]]; then
-            info "Skipping $domain"
-            return 2
+        if [ -t 0 ] && [ "${PARALLEL_JOBS:-1}" -eq 1 ]; then
+            read -p "$(echo -e ${YELLOW}Skip? [Y/n]: ${NC})" -n 1 -r
+            echo
+            if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+                info "Skipping $domain"
+                return 2
+            fi
+        else
+            warning "Continuing without prompt in parallel/non-interactive mode"
         fi
     fi
     
@@ -213,7 +217,7 @@ export -f info
 export -f success
 export -f error
 export -f warning
-export WEBENUM_SCRIPT EXTRA_ARGS OUTPUT_DIR LOG_DIR BLUE GREEN RED YELLOW NC
+export WEBENUM_SCRIPT EXTRA_ARGS OUTPUT_DIR LOG_DIR PARALLEL_JOBS BLUE GREEN RED YELLOW NC
 
 # Read domains
 mapfile -t DOMAINS < <(grep -v '^#' "$DOMAINS_FILE" | grep -v '^[[:space:]]*$')
