@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-WebEnum - Advanced Web Enumeration Tool
+GivEnum - Advanced Web Enumeration Tool
 Modern reconnaissance framework with comprehensive subdomain discovery,
 URL collection, vulnerability scanning, and asset analysis.
 """
@@ -66,7 +66,7 @@ class APIConfig:
     """API Keys Configuration"""
     
     def __init__(self):
-        self.config_file = Path.home() / '.config' / 'webenum' / 'api_keys.json'
+        self.config_file = Path.home() / '.config' / 'givenum' / 'api_keys.json'
         self.keys = self.load_keys()
     
     def load_keys(self) -> Dict[str, str]:
@@ -98,7 +98,7 @@ class ToolChecker:
         'subdomain': ['subfinder', 'assetfinder', 'findomain', 'amass', 'knockpy'],
         'dns': ['dnsx', 'puredns', 'massdns', 'dnsvalidator'],
         'http': ['httpx', 'hakcheckurl'],
-        'url_collect': ['xurlfind3r', 'waybackurls', 'gau', 'hakrawler', 'photon', 'meg'],
+        'url_collect': ['xurlfind3r', 'waybackurls', 'gau', 'hakrawler', 'meg'],
         'js_analysis': ['subjs', 'jsubfinder', 'getJS'],
         'utils': ['anew', 'uro', 'unfurl', 'qsreplace', 'freq'],
         'scanning': ['nuclei', 'sdlookup'],
@@ -110,6 +110,15 @@ class ToolChecker:
     def check_tool(tool: str) -> bool:
         """Check if a tool is installed"""
         return shutil.which(tool) is not None
+
+    @staticmethod
+    def check_python_module(module: str) -> bool:
+        """Check if a Python module can be imported"""
+        result = subprocess.run(
+            [sys.executable, '-c', f'import {module}'],
+            capture_output=True
+        )
+        return result.returncode == 0
 
     @classmethod
     def check_all(cls, check_optional: bool = False) -> Dict[str, List[str]]:
@@ -128,6 +137,15 @@ class ToolChecker:
                     missing.append(tool)
 
         return {'available': available, 'missing': missing}
+
+
+def count_nonempty_lines(file_path: Path) -> int:
+    """Count non-empty lines in a file"""
+    if not file_path or not file_path.exists():
+        return 0
+
+    with open(file_path, 'r') as f:
+        return sum(1 for line in f if line.strip())
 
 
 class OutputManager:
@@ -436,6 +454,48 @@ class SubdomainEnum:
         Logger.success(f"Total: {len(all_subs)} unique subdomains")
         return output_file
 
+    def bruteforce_with_puredns(self) -> Set[str]:
+        """DNS brute-force subdomains with puredns"""
+        if not ToolChecker.check_tool('puredns'):
+            Logger.warning("puredns not found, skipping brute-force")
+            return set()
+
+        wordlist_candidates = [
+            Path.home() / '.config' / 'givenum' / 'wordlists' / 'subdomains.txt',
+            Path('/usr/share/seclists/Discovery/DNS/subdomains-top1million-5000.txt'),
+            Path('/usr/share/seclists/Discovery/DNS/bitquark-subdomains-top100000.txt'),
+            Path('/usr/share/wordlists/subdomains.txt'),
+        ]
+        wordlist = next((w for w in wordlist_candidates if w.exists()), None)
+
+        if not wordlist:
+            Logger.warning("No wordlist found for brute-force — place one at ~/.config/givenum/wordlists/subdomains.txt")
+            return set()
+
+        Logger.info(f"Brute-forcing subdomains with puredns ({wordlist.name})...")
+        output_file = self.output_mgr.get_path('subdomains', 'bruteforce.txt')
+
+        try:
+            subprocess.run(
+                ['puredns', 'bruteforce', str(wordlist), self.domain, '-w', str(output_file)],
+                timeout=1800,
+            )
+
+            subs = set()
+            if output_file.exists():
+                with open(output_file, 'r') as f:
+                    subs = set(line.strip() for line in f if line.strip())
+
+            Logger.success(f"Brute-force: {len(subs)} subdomains found")
+            return subs
+
+        except subprocess.TimeoutExpired:
+            Logger.warning("puredns brute-force timed out")
+        except Exception as e:
+            Logger.error(f"Error in brute-force: {e}")
+
+        return set()
+
 
 class DNSResolver:
     """DNS resolution and validation"""
@@ -465,15 +525,47 @@ class DNSResolver:
                 check=True
             )
 
-            with open(output_file, 'r') as f:
-                count = sum(1 for line in f if line.strip())
+            count = count_nonempty_lines(output_file)
 
-            Logger.success(f"Resolved: {count} active subdomains")
+            if count == 0:
+                Logger.warning("puredns resolved 0 subdomains (wildcard DNS or no valid results)")
+                fallback = self.resolve_with_dnsx_fallback(input_file)
+                return fallback if fallback else input_file
+            else:
+                Logger.success(f"Resolved: {count} active subdomains")
             return output_file
 
         except Exception as e:
             Logger.error(f"Error in puredns: {e}")
             return input_file
+
+    def resolve_with_dnsx_fallback(self, input_file: Path) -> Optional[Path]:
+        """Resolve directly with dnsx (fallback when puredns returns 0)"""
+        if not ToolChecker.check_tool('dnsx'):
+            return None
+
+        Logger.warning("puredns returned 0 — falling back to dnsx resolution...")
+        output_file = self.output_mgr.get_path('dns', 'resolved.txt')
+
+        try:
+            with open(output_file, 'w') as out_f:
+                subprocess.run(
+                    ['dnsx', '-l', str(input_file), '-a', '-silent'],
+                    stdout=out_f,
+                    stderr=subprocess.DEVNULL,
+                    timeout=600,
+                )
+            count = count_nonempty_lines(output_file)
+            if count > 0:
+                Logger.success(f"dnsx fallback: {count} resolved")
+                return output_file
+            Logger.warning("dnsx fallback also returned 0")
+            Logger.info("Tip: this often happens with Akamai/Cloudflare CDN (anycast IPs differ per resolver)")
+            Logger.info("httpx will still probe the raw subdomain list with its own DNS resolution")
+            return None
+        except Exception as e:
+            Logger.error(f"dnsx fallback error: {e}")
+            return None
 
     def enrich_with_dnsx(self, input_file: Path):
         """Enrich with DNS records using dnsx"""
@@ -485,21 +577,23 @@ class DNSResolver:
 
         # A records
         a_records = self.output_mgr.get_path('dns', 'a_records.txt')
-        subprocess.run(
-            ['dnsx', '-l', str(input_file), '-a', '-resp-only', '-silent'],
-            stdout=open(a_records, 'w'),
-            stderr=subprocess.DEVNULL,
-            timeout=300
-        )
+        with open(a_records, 'w') as out_f:
+            subprocess.run(
+                ['dnsx', '-l', str(input_file), '-a', '-resp-only', '-silent'],
+                stdout=out_f,
+                stderr=subprocess.DEVNULL,
+                timeout=300,
+            )
 
         # CNAME records
         cname_records = self.output_mgr.get_path('dns', 'cname_records.txt')
-        subprocess.run(
-            ['dnsx', '-l', str(input_file), '-cname', '-resp-only', '-silent'],
-            stdout=open(cname_records, 'w'),
-            stderr=subprocess.DEVNULL,
-            timeout=300
-        )
+        with open(cname_records, 'w') as out_f:
+            subprocess.run(
+                ['dnsx', '-l', str(input_file), '-cname', '-resp-only', '-silent'],
+                stdout=out_f,
+                stderr=subprocess.DEVNULL,
+                timeout=300,
+            )
 
         Logger.success("DNS enrichment complete")
 
@@ -545,11 +639,11 @@ class PortScanner:
             cmd = ['sdlookup', '-i', str(ip_file), '-json', '-o', str(output_file)]
             subprocess.run(cmd, timeout=300, check=True)
             
-            # Parse results
+            # Parse results (sdlookup outputs JSONL, one JSON object per line)
             if output_file.exists():
                 with open(output_file, 'r') as f:
-                    data = json.load(f)
-                
+                    data = [json.loads(line) for line in f if line.strip()]
+
                 summary = []
                 for result in data:
                     ip = result.get('ip', '')
@@ -617,7 +711,8 @@ class HTTPProber:
                         pass
 
             with open(output_file, 'w') as f:
-                f.write('\n'.join(urls) + '\n')
+                if urls:
+                    f.write('\n'.join(urls) + '\n')
 
             Logger.success(f"Found {len(urls)} active HTTP services")
             return output_file
@@ -667,10 +762,11 @@ class HTTPProber:
 
         try:
             cmd = [
-                'gowitness', 'file',
+                'gowitness', 'scan', 'file',
                 '-f', str(input_file),
                 '--screenshot-path', str(screenshots_dir),
-                '--db-path', str(db_file)
+                '--write-db',
+                '--write-db-uri', f'sqlite://{db_file}'
             ]
 
             subprocess.run(cmd, timeout=1800, check=True)
@@ -686,6 +782,19 @@ class URLCollector:
     def __init__(self, output_mgr: OutputManager):
         self.output_mgr = output_mgr
 
+    @staticmethod
+    def _extract_host(value: str) -> str:
+        """Normalize a URL or hostname to a bare host"""
+        value = value.strip()
+        if not value:
+            return ''
+
+        if '://' not in value:
+            value = f'https://{value}'
+
+        parsed = urlparse(value)
+        return (parsed.hostname or parsed.netloc or '').strip().lower()
+
     def collect_with_xurlfind3r(self, input_file: Path) -> Set[str]:
         """Collect URLs using xurlfind3r (modern, efficient)"""
         if not ToolChecker.check_tool('xurlfind3r'):
@@ -697,12 +806,16 @@ class URLCollector:
         
         try:
             with open(input_file, 'r') as f:
-                domains = [line.strip() for line in f if line.strip()]
+                domains = sorted({
+                    self._extract_host(line)
+                    for line in f
+                    if self._extract_host(line)
+                })
             
             all_urls = set()
             for domain in domains[:50]:  # Limit to prevent excessive API calls
                 result = subprocess.run(
-                    ['xurlfind3r', '-d', domain, '-silent'],
+                    ['xurlfind3r', '-d', domain, '--silent'],
                     capture_output=True,
                     text=True,
                     timeout=60
@@ -729,6 +842,9 @@ class URLCollector:
         # xurlfind3r (primary)
         all_urls.update(self.collect_with_xurlfind3r(input_file))
 
+        # hakrawler (crawl-based)
+        all_urls.update(self.collect_with_hakrawler(input_file))
+
         # GAU (backup)
         if ToolChecker.check_tool('gau'):
             Logger.info("Running gau...")
@@ -736,10 +852,15 @@ class URLCollector:
 
             try:
                 with open(input_file, 'r') as f:
-                    domains = [line.strip() for line in f if line.strip()]
+                    domains = sorted({
+                        self._extract_host(line)
+                        for line in f
+                        if self._extract_host(line)
+                    })
 
                 result = subprocess.run(
-                    ['gau'] + domains[:30],
+                    ['gau', '--subs'],
+                    input='\n'.join(domains[:30]),
                     capture_output=True,
                     text=True,
                     timeout=600
@@ -763,11 +884,15 @@ class URLCollector:
 
             try:
                 with open(input_file, 'r') as f:
-                    domains = f.read()
+                    # waybackurls needs bare hostnames, not full URLs
+                    domain_names = '\n'.join(
+                        self._extract_host(line) for line in f
+                        if self._extract_host(line.strip())
+                    )
 
                 result = subprocess.run(
                     ['waybackurls'],
-                    input=domains,
+                    input=domain_names,
                     capture_output=True,
                     text=True,
                     timeout=600
@@ -786,9 +911,135 @@ class URLCollector:
 
         return all_urls
 
+    def collect_with_hakrawler(self, input_file: Path) -> Set[str]:
+        """Crawl URLs with hakrawler"""
+        if not ToolChecker.check_tool('hakrawler'):
+            Logger.warning("hakrawler not found")
+            return set()
+
+        Logger.info("Crawling with hakrawler...")
+        output_file = self.output_mgr.get_path('urls', 'hakrawler.txt')
+
+        try:
+            with open(input_file, 'r') as f:
+                result = subprocess.run(
+                    ['hakrawler', '-d', '2', '-u', '-timeout', '10'],
+                    stdin=f,
+                    capture_output=True,
+                    text=True,
+                    timeout=600
+                )
+
+            urls = set(line.strip() for line in result.stdout.split('\n') if line.strip())
+
+            with open(output_file, 'w') as f:
+                f.write('\n'.join(sorted(urls)) + '\n')
+
+            Logger.success(f"hakrawler: {len(urls)} URLs")
+            return urls
+
+        except Exception as e:
+            Logger.error(f"Error in hakrawler: {e}")
+            return set()
+
+    def probe_paths_with_meg(self, input_file: Path) -> Set[str]:
+        """Probe common paths on all hosts with meg"""
+        if not ToolChecker.check_tool('meg'):
+            Logger.warning("meg not found")
+            return set()
+
+        Logger.info("Probing paths with meg...")
+
+        meg_dir = self.output_mgr.get_path('urls', 'meg_out')
+        meg_dir.mkdir(exist_ok=True)
+
+        # Common paths worth probing
+        interesting_paths = [
+            '/robots.txt', '/sitemap.xml', '/.well-known/security.txt',
+            '/crossdomain.xml', '/clientaccesspolicy.xml',
+            '/api', '/api/v1', '/api/v2', '/swagger.json', '/openapi.json',
+            '/.env', '/config.json', '/package.json',
+        ]
+
+        paths_file = self.output_mgr.get_path('urls', 'meg_paths.txt')
+        with open(paths_file, 'w') as f:
+            f.write('\n'.join(interesting_paths) + '\n')
+
+        try:
+            subprocess.run(
+                ['meg', '-d', '1000', '-v', str(paths_file), str(input_file), str(meg_dir)],
+                timeout=600,
+                stderr=subprocess.DEVNULL
+            )
+
+            # Collect 200 responses
+            found = set()
+            for out_file in meg_dir.rglob('*'):
+                if out_file.is_file():
+                    try:
+                        with open(out_file, 'r', errors='ignore') as f:
+                            content = f.read()
+                        if content.startswith('HTTP/') and ' 200 ' in content.split('\n')[0]:
+                            # First line of meg output: "HTTP/1.1 200 OK || https://host/path"
+                            first = content.split('\n')[0]
+                            if '||' in first:
+                                url = first.split('||')[1].strip()
+                                found.add(url)
+                    except Exception:
+                        pass
+
+            results_file = self.output_mgr.get_path('urls', 'meg_found.txt')
+            with open(results_file, 'w') as f:
+                f.write('\n'.join(sorted(found)) + '\n')
+
+            Logger.success(f"meg: {len(found)} interesting paths found")
+            return found
+
+        except Exception as e:
+            Logger.error(f"Error in meg: {e}")
+            return set()
+
+    def analyze_with_freq(self, input_file: Path):
+        """Score URLs/words by character frequency to surface anomalies"""
+        if not ToolChecker.check_tool('freq'):
+            Logger.warning("freq not found")
+            return
+
+        Logger.info("Scoring endpoints with freq...")
+
+        output_file = self.output_mgr.get_path('urls', 'freq_scores.txt')
+
+        # freq needs a pre-built corpus file; fall back gracefully if absent
+        corpus_candidates = [
+            Path.home() / '.config' / 'givenum' / 'freq_corpus.txt',
+            Path('/usr/share/dict/words'),
+        ]
+        corpus = next((c for c in corpus_candidates if c.exists()), None)
+        if not corpus:
+            Logger.warning("freq: no corpus file found, skipping")
+            return
+
+        try:
+            with open(input_file, 'r') as f:
+                result = subprocess.run(
+                    ['freq', str(corpus)],
+                    stdin=f,
+                    capture_output=True,
+                    text=True,
+                    timeout=120
+                )
+
+            with open(output_file, 'w') as f:
+                f.write(result.stdout)
+
+            Logger.success(f"freq: scores saved to {output_file}")
+
+        except Exception as e:
+            Logger.error(f"Error in freq: {e}")
+
     def crawl_with_photon(self, url: str) -> Set[str]:
         """Targeted crawling with Photon"""
-        if not ToolChecker.check_tool('photon'):
+        if not (ToolChecker.check_tool('photon') or ToolChecker.check_python_module('photon')):
             return set()
         
         Logger.info(f"Crawling {url} with Photon...")
@@ -797,14 +1048,18 @@ class URLCollector:
         output_dir.mkdir(exist_ok=True)
         
         try:
-            cmd = [
-                'python3', '-m', 'photon',
+            if ToolChecker.check_tool('photon'):
+                cmd = ['photon']
+            else:
+                cmd = [sys.executable, '-m', 'photon']
+
+            cmd.extend([
                 '-u', url,
                 '-l', '2',
                 '-t', '10',
                 '--timeout', '5',
                 '-o', str(output_dir)
-            ]
+            ])
             
             subprocess.run(cmd, timeout=300, stderr=subprocess.DEVNULL)
             
@@ -853,7 +1108,7 @@ class URLCollector:
             with open(clean_file, 'w') as f:
                 f.write(result.stdout)
 
-            cleaned_count = len(result.stdout.split('\n'))
+            cleaned_count = len([l for l in result.stdout.split('\n') if l.strip()])
             Logger.success(f"Cleaned URLs: {cleaned_count}")
 
         except Exception as e:
@@ -1081,11 +1336,10 @@ class VulnScanner:
                 '-l', str(input_file),
                 '-severity', severity,
                 '-silent',
-                '-json',
-                '-o', str(json_file)
+                '-jsonl-export', str(json_file)
             ]
             
-            subprocess.run(cmd, timeout=3600)
+            subprocess.run(cmd, timeout=3600, check=True)
             
             # Parse results
             vulns = []
@@ -1099,15 +1353,61 @@ class VulnScanner:
                             pass
             
             with open(output_file, 'w') as f:
-                f.write('\n'.join(vulns))
+                if vulns:
+                    f.write('\n'.join(vulns) + '\n')
             
             if vulns:
                 Logger.warning(f"Found {len(vulns)} potential vulnerabilities!")
             else:
                 Logger.success("No vulnerabilities found")
-                
+
         except Exception as e:
             Logger.error(f"Error in Nuclei: {e}")
+
+    def scan_with_dalfox(self, url_file: Path):
+        """Scan parameterized URLs for XSS with dalfox"""
+        if not ToolChecker.check_tool('dalfox'):
+            Logger.warning("dalfox not found")
+            return
+
+        Logger.header("XSS SCANNING")
+        Logger.info("Scanning for XSS with dalfox...")
+
+        try:
+            with open(url_file, 'r') as f:
+                param_urls = [line.strip() for line in f if '?' in line and line.strip()]
+
+            if not param_urls:
+                Logger.info("No parameterized URLs to scan with dalfox")
+                return
+
+            # Limit to avoid excessive scanning
+            targets = param_urls[:100]
+            Logger.info(f"Scanning {len(targets)} parameterized URLs...")
+
+            targets_file = self.output_mgr.get_path('vulnerabilities', 'dalfox_targets.txt')
+            output_file = self.output_mgr.get_path('vulnerabilities', 'dalfox_results.txt')
+
+            with open(targets_file, 'w') as f:
+                f.write('\n'.join(targets) + '\n')
+
+            subprocess.run(
+                ['dalfox', 'file', str(targets_file),
+                 '--silence', '--no-color',
+                 '--output', str(output_file)],
+                timeout=1800,
+            )
+
+            found = count_nonempty_lines(output_file) if output_file.exists() else 0
+            if found > 0:
+                Logger.warning(f"dalfox: {found} potential XSS found! → {output_file}")
+            else:
+                Logger.success("dalfox: no XSS found")
+
+        except subprocess.TimeoutExpired:
+            Logger.warning("dalfox timed out")
+        except Exception as e:
+            Logger.error(f"Error in dalfox: {e}")
 
 
 class CloudDetector:
@@ -1254,25 +1554,71 @@ class TakeoverChecker:
         Logger.info("Checking with subzy...")
 
         output_file = self.output_mgr.get_path('takeover', 'subzy_results.txt')
+        json_file = self.output_mgr.get_path('takeover', 'subzy_results.json')
 
         try:
             result = subprocess.run(
-                ['subzy', 'run', '--targets', str(input_file)],
+                ['subzy', 'run', '--targets', str(input_file), '--output', str(json_file)],
                 capture_output=True,
                 text=True,
-                timeout=300
+                timeout=300,
+                check=True
             )
 
             with open(output_file, 'w') as f:
                 f.write(result.stdout)
 
-            if result.stdout.strip():
-                Logger.warning(f"Possible takeovers found!")
+            findings = []
+            if json_file.exists():
+                with open(json_file, 'r') as f:
+                    data = json.load(f)
+                if isinstance(data, list):
+                    findings = data
+                elif isinstance(data, dict):
+                    findings = [data]
+
+            if findings:
+                Logger.warning("Possible takeovers found!")
             else:
                 Logger.success("No takeover detected")
 
         except Exception as e:
             Logger.warning(f"Error in subzy: {e}")
+
+    def check_with_subjack(self, input_file: Path):
+        """Check for subdomain takeover with subjack"""
+        if not ToolChecker.check_tool('subjack'):
+            Logger.warning("subjack not found")
+            return
+
+        Logger.info("Checking takeovers with subjack...")
+        output_file = self.output_mgr.get_path('takeover', 'subjack_results.txt')
+
+        try:
+            subprocess.run(
+                ['subjack', '-w', str(input_file), '-o', str(output_file),
+                 '-ssl', '-timeout', '30', '-c',
+                 str(Path.home() / 'go' / 'pkg' / 'mod' / 'github.com' / 'haccer' / 'subjack@v0.0.0-20201112041112-049c369c6946' / 'fingerprints.json')],
+                timeout=600,
+            )
+        except FileNotFoundError:
+            # Try without fingerprints path (newer versions bundle it)
+            try:
+                subprocess.run(
+                    ['subjack', '-w', str(input_file), '-o', str(output_file), '-ssl', '-timeout', '30'],
+                    timeout=600,
+                )
+            except Exception as e:
+                Logger.error(f"Error in subjack: {e}")
+                return
+        except Exception as e:
+            Logger.error(f"Error in subjack: {e}")
+            return
+
+        if output_file.exists() and count_nonempty_lines(output_file) > 0:
+            Logger.warning(f"subjack: potential takeovers found! → {output_file}")
+        else:
+            Logger.success("subjack: no takeovers found")
 
 
 class DiffManager:
@@ -1432,7 +1778,7 @@ class ReportGenerator:
             json.dump(report, f, indent=2)
 
 
-class WebEnum:
+class GivEnum:
     """Main enumeration orchestrator"""
 
     def __init__(self, domain: str, output_dir: str = './results', api_config: APIConfig = None):
@@ -1455,32 +1801,60 @@ class WebEnum:
         self.diff_manager = DiffManager(self.output_mgr, domain)
         self.report_generator = ReportGenerator(self.output_mgr, domain)
 
-    def run_full_enum(self, skip_screenshots: bool = False, skip_portscan: bool = False, 
-                     skip_vuln_scan: bool = False):
-        """Run complete enumeration"""
+    def run_full_enum(self, skip_screenshots: bool = False, skip_portscan: bool = False,
+                     skip_vuln_scan: bool = False, active: bool = False):
+        """Run complete enumeration.
+
+        Passive mode (default): subdomain discovery, DNS, HTTP, URL/JS collection,
+        git exposure, takeover checks (subzy), diff, reports.
+
+        Active mode (--active): adds brute-force, port scan, nuclei, dalfox, subjack, arjun.
+        """
         start_time = time.time()
 
-        Logger.header(f"WEB ENUMERATION: {self.domain}")
+        if active:
+            Logger.header(f"WEB ENUMERATION (ACTIVE): {self.domain}")
+        else:
+            Logger.header(f"WEB ENUMERATION (PASSIVE): {self.domain}")
+            Logger.info("Tip: use --active to enable brute-force, port scan, nuclei, dalfox, subjack")
 
-        # 1. Subdomain enumeration
+        # 1. Subdomain enumeration (passive sources)
         subs_file = self.subdomain_enum.run_all()
+
+        # 1b. DNS brute-force (active only)
+        if active:
+            Logger.header("DNS BRUTE-FORCE")
+            brute_subs = self.subdomain_enum.bruteforce_with_puredns()
+            if brute_subs:
+                with open(subs_file, 'r') as f:
+                    existing = set(line.strip() for line in f if line.strip())
+                merged = existing | brute_subs
+                with open(subs_file, 'w') as f:
+                    f.write('\n'.join(sorted(merged)) + '\n')
+                Logger.success(f"After brute-force: {len(merged)} total subdomains")
 
         # 2. DNS Resolution
         resolved_file = self.dns_resolver.resolve_with_puredns(subs_file)
         self.dns_resolver.enrich_with_dnsx(resolved_file)
 
+        if count_nonempty_lines(resolved_file) == 0:
+            Logger.warning("No resolved subdomains found, stopping after DNS phase")
+            self._finalize_run(start_time)
+            return
+
         # 3. Cloud detection
         self.cloud_detector.detect(resolved_file)
 
-        # 4. Port scanning
-        if not skip_portscan:
+        # 4. Port scanning (active only)
+        if active and not skip_portscan:
             self.port_scanner.scan_with_sdlookup(resolved_file)
 
         # 5. HTTP Probing
         alive_file = self.http_prober.probe_with_httpx(resolved_file)
 
-        if not alive_file:
-            Logger.error("No active hosts found!")
+        if not alive_file or count_nonempty_lines(alive_file) == 0:
+            Logger.warning("No active hosts found, stopping after HTTP probing")
+            self._finalize_run(start_time)
             return
 
         self.http_prober.check_urls_with_hakcheckurl(alive_file)
@@ -1492,37 +1866,68 @@ class WebEnum:
         # 7. URL Collection
         all_urls = self.url_collector.collect_from_archives(alive_file)
 
-        # 8. Clean URLs
+        # 8. Probe common paths with meg
+        self.url_collector.probe_paths_with_meg(alive_file)
+
+        # 9. Photon crawl (first 5 alive hosts to avoid excess)
+        try:
+            with open(alive_file, 'r') as f:
+                photon_targets = [l.strip() for l in f if l.strip()][:5]
+            for target_url in photon_targets:
+                all_urls.update(self.url_collector.crawl_with_photon(target_url))
+        except Exception as e:
+            Logger.error(f"Error during Photon crawl: {e}")
+
+        # 10. Clean URLs
         if all_urls:
             self.url_collector.clean_urls(all_urls)
             clean_urls = self.output_mgr.get_path('urls', 'urls_clean.txt')
-            
-            # 9. Parameter Analysis
+
+            # 11. Frequency analysis with freq
+            if clean_urls.exists():
+                self.url_collector.analyze_with_freq(clean_urls)
+
+            # 12. Parameter analysis — passive; arjun brute-force only in active
             if clean_urls.exists():
                 self.param_discovery.analyze_parameters(clean_urls)
-                self.param_discovery.discover_with_arjun(clean_urls)
+                if active:
+                    self.param_discovery.discover_with_arjun(clean_urls)
 
-        # 10. JavaScript Analysis
+        # 13. JavaScript Analysis
         self.js_analyzer.analyze_all(alive_file)
 
-        # 11. Git exposure
+        # 14. Git exposure
         self.git_dumper.check_and_dump(alive_file)
 
-        # 12. Vulnerability scanning
-        if not skip_vuln_scan:
+        # 15. Vulnerability scanning (active only)
+        if active and not skip_vuln_scan:
             self.vuln_scanner.scan_with_nuclei(alive_file)
 
-        # 13. Takeover check
-        self.takeover_checker.check_with_subzy(resolved_file)
+            # 15b. XSS scanning with dalfox (active only)
+            clean_urls = self.output_mgr.get_path('urls', 'urls_clean.txt')
+            if clean_urls.exists():
+                self.vuln_scanner.scan_with_dalfox(clean_urls)
 
-        # 14. Diff tracking
+        # 16. Takeover check
+        self.takeover_checker.check_with_subzy(resolved_file)
+        if active:
+            self.takeover_checker.check_with_subjack(resolved_file)
+
+        # 17. Diff tracking
         self.diff_manager.diff_results()
 
-        # 15. Generate reports
+        # 18. Generate reports
         self.report_generator.generate_markdown_report()
         self.report_generator.generate_json_report()
 
         # Summary
+        self._print_summary(time.time() - start_time)
+
+    def _finalize_run(self, start_time: float):
+        """Write partial results and print a summary before exiting early"""
+        self.diff_manager.diff_results()
+        self.report_generator.generate_markdown_report()
+        self.report_generator.generate_json_report()
         elapsed = time.time() - start_time
         self._print_summary(elapsed)
 
@@ -1540,9 +1945,7 @@ class WebEnum:
         for name, path in summary.items():
             if path.exists():
                 try:
-                    with open(path, 'r') as f:
-                        count = sum(1 for line in f if line.strip())
-                    Logger.info(f"{name}: {count}")
+                    Logger.info(f"{name}: {count_nonempty_lines(path)}")
                 except:
                     pass
 
@@ -1594,15 +1997,17 @@ def main():
     print(banner)
 
     parser = argparse.ArgumentParser(
-        description='WebEnum - Advanced web enumeration',
+        description='GivEnum - Advanced web enumeration',
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
     parser.add_argument('-d', '--domain', help='Target domain')
     parser.add_argument('-o', '--output', default='./results', help='Output directory')
+    parser.add_argument('--active', action='store_true',
+                        help='Enable active scanning (brute-force, port scan, nuclei, dalfox, subjack, arjun)')
     parser.add_argument('--skip-screenshots', action='store_true', help='Skip screenshots')
-    parser.add_argument('--skip-portscan', action='store_true', help='Skip port scan')
-    parser.add_argument('--skip-vuln-scan', action='store_true', help='Skip vulnerability scan')
+    parser.add_argument('--skip-portscan', action='store_true', help='Skip port scan (active mode only)')
+    parser.add_argument('--skip-vuln-scan', action='store_true', help='Skip vulnerability scan (active mode only)')
     parser.add_argument('--check-tools', action='store_true', help='Check tools')
     parser.add_argument('--configure-api', action='store_true', help='Configure API keys')
 
@@ -1641,11 +2046,12 @@ def main():
 
     # Run enumeration
     try:
-        enum = WebEnum(args.domain, args.output)
+        enum = GivEnum(args.domain, args.output)
         enum.run_full_enum(
             skip_screenshots=args.skip_screenshots,
             skip_portscan=args.skip_portscan,
-            skip_vuln_scan=args.skip_vuln_scan
+            skip_vuln_scan=args.skip_vuln_scan,
+            active=args.active
         )
     except KeyboardInterrupt:
         Logger.warning("\nInterrupted")

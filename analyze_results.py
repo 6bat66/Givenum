@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-WebEnum Results Analyzer
+GivEnum Results Analyzer
 Analyze and generate reports from scan results
 """
 
@@ -41,6 +41,7 @@ class ResultsAnalyzer:
 
         # Subdomains
         self.subdomains = self._load_txt('subdomains/all_subdomains.txt')
+        self.bruteforce_subs = self._load_txt('subdomains/bruteforce.txt')
 
         # Resolved
         self.resolved = self._load_txt('dns/resolved.txt')
@@ -49,13 +50,20 @@ class ResultsAnalyzer:
         self.alive = self._load_txt('http/alive.txt')
 
         # HTTPx data
-        self.http_data = self._load_httpx_json('http/httpx.json')
+        self.http_data = self._load_httpx_json('http/httpx_full.json')
 
         # URLs
-        self.urls = self._load_txt('urls/all_urls_clean.txt')
+        self.urls = self._load_txt('urls/urls_clean.txt')
 
         # JS files
-        self.js_files = self._load_txt('js/js_files.txt')
+        self.js_files = self._load_txt('js/all_js_files.txt')
+
+        # Active scan findings
+        self.open_ports = self._load_txt('ports/open_ports.txt')
+        self.nuclei_results = self._load_txt('vulnerabilities/nuclei_results.txt')
+        self.dalfox_results = self._load_txt('vulnerabilities/dalfox_results.txt')
+        self.subjack_results = self._load_txt('takeover/subjack_results.txt')
+        self.parameters = self._load_txt('parameters/interesting_parameters.txt')
 
     def _load_txt(self, relative_path: str) -> set:
         """Load text file"""
@@ -90,16 +98,37 @@ class ResultsAnalyzer:
         print(f"{Colors.HEADER}{Colors.BOLD}{'SUMMARY'.center(60)}{Colors.ENDC}")
         print(f"{Colors.HEADER}{Colors.BOLD}{'='*60}{Colors.ENDC}\n")
 
-        stats = [
+        # Passive findings
+        passive_stats = [
             ("Subdomains found", len(self.subdomains)),
             ("Resolved", len(self.resolved)),
             ("Active HTTP", len(self.alive)),
             ("URLs collected", len(self.urls)),
             ("JS files", len(self.js_files)),
+            ("Interesting parameters", len(self.parameters)),
         ]
 
-        for name, count in stats:
-            print(f"{Colors.OKGREEN}[+]{Colors.ENDC} {name:.<45} {Colors.OKBLUE}{count}{Colors.ENDC}")
+        print(f"{Colors.OKBLUE}[*] Passive{Colors.ENDC}")
+        for name, count in passive_stats:
+            print(f"    {name:.<43} {Colors.OKBLUE}{count}{Colors.ENDC}")
+
+        # Active findings (only show if data exists)
+        active_stats = [
+            ("Brute-forced subdomains", len(self.bruteforce_subs)),
+            ("Hosts with open ports", len(self.open_ports)),
+            ("Nuclei findings", len(self.nuclei_results)),
+            ("Dalfox XSS findings", len(self.dalfox_results)),
+            ("Takeover candidates (subjack)", len(self.subjack_results)),
+        ]
+
+        active_data = [(n, c) for n, c in active_stats if c > 0]
+        if active_data:
+            print(f"\n{Colors.WARNING}[!] Active (--active mode){Colors.ENDC}")
+            for name, count in active_data:
+                color = Colors.FAIL if count > 0 else Colors.OKBLUE
+                print(f"    {name:.<43} {color}{count}{Colors.ENDC}")
+        else:
+            print(f"\n{Colors.WARNING}[!] No active scan data (run with --active){Colors.ENDC}")
 
     def analyze_technologies(self):
         """Analyze technologies"""
@@ -235,6 +264,71 @@ class ResultsAnalyzer:
             for param, url in param_urls[:5]:
                 print(f"    [{param}] {url[:100]}")
 
+    def analyze_active_findings(self):
+        """Analyze and display findings from active scan tools"""
+        has_data = any([self.nuclei_results, self.dalfox_results,
+                        self.subjack_results, self.open_ports, self.bruteforce_subs])
+
+        if not has_data:
+            print(f"\n{Colors.WARNING}[!] No active scan data — run with --active to get nuclei/dalfox/subjack results{Colors.ENDC}")
+            return
+
+        print(f"\n{Colors.HEADER}{Colors.BOLD}{'ACTIVE SCAN FINDINGS'}{Colors.ENDC}\n")
+
+        # Brute-forced subdomains
+        if self.bruteforce_subs:
+            print(f"{Colors.OKGREEN}[+] Brute-forced subdomains ({len(self.bruteforce_subs)}):{Colors.ENDC}")
+            for sub in sorted(self.bruteforce_subs)[:15]:
+                print(f"    {sub}")
+            if len(self.bruteforce_subs) > 15:
+                print(f"    ... and {len(self.bruteforce_subs) - 15} more")
+            print()
+
+        # Open ports
+        if self.open_ports:
+            print(f"{Colors.OKGREEN}[+] Open ports:{Colors.ENDC}")
+            for entry in sorted(self.open_ports)[:20]:
+                print(f"    {entry}")
+            print()
+
+        # Nuclei findings — grouped by severity
+        if self.nuclei_results:
+            severity_order = ['critical', 'high', 'medium', 'low', 'info']
+            grouped = defaultdict(list)
+            for finding in self.nuclei_results:
+                sev = 'unknown'
+                m = re.match(r'\[(critical|high|medium|low|info)\]', finding, re.IGNORECASE)
+                if m:
+                    sev = m.group(1).lower()
+                grouped[sev].append(finding)
+
+            print(f"{Colors.FAIL}[!] Nuclei findings ({len(self.nuclei_results)}):{Colors.ENDC}")
+            for sev in severity_order:
+                if grouped[sev]:
+                    color = Colors.FAIL if sev in ('critical', 'high') else Colors.WARNING
+                    print(f"  {color}[{sev.upper()}] {len(grouped[sev])} findings{Colors.ENDC}")
+                    for f in grouped[sev][:5]:
+                        print(f"    → {f[:100]}")
+                    if len(grouped[sev]) > 5:
+                        print(f"    ... and {len(grouped[sev]) - 5} more")
+            print()
+
+        # Dalfox XSS
+        if self.dalfox_results:
+            print(f"{Colors.FAIL}[!] Dalfox XSS findings ({len(self.dalfox_results)}):{Colors.ENDC}")
+            for finding in list(self.dalfox_results)[:10]:
+                print(f"    → {finding[:100]}")
+            if len(self.dalfox_results) > 10:
+                print(f"    ... and {len(self.dalfox_results) - 10} more")
+            print()
+
+        # Subjack takeover
+        if self.subjack_results:
+            print(f"{Colors.FAIL}[!] Subjack takeover candidates ({len(self.subjack_results)}):{Colors.ENDC}")
+            for finding in self.subjack_results:
+                print(f"    → {finding}")
+            print()
+
     def find_vulnerabilities(self):
         """Find potential vulnerabilities"""
         print(f"\n{Colors.HEADER}{Colors.BOLD}{'POTENTIAL VULNERABILITIES'}{Colors.ENDC}\n")
@@ -299,16 +393,27 @@ class ResultsAnalyzer:
         lines = []
 
         # Header
-        lines.append(f"# WebEnum Analysis Report")
+        lines.append(f"# GivEnum Analysis Report")
         lines.append(f"\n**Directory:** `{self.results_dir}`\n")
 
         # Summary
         lines.append("## Summary\n")
         lines.append(f"- **Subdomains:** {len(self.subdomains)}")
+        if self.bruteforce_subs:
+            lines.append(f"- **Brute-forced subdomains:** {len(self.bruteforce_subs)}")
         lines.append(f"- **Resolved:** {len(self.resolved)}")
         lines.append(f"- **Active HTTP:** {len(self.alive)}")
         lines.append(f"- **URLs:** {len(self.urls)}")
-        lines.append(f"- **JS files:** {len(self.js_files)}\n")
+        lines.append(f"- **JS files:** {len(self.js_files)}")
+        if self.open_ports:
+            lines.append(f"- **Hosts with open ports:** {len(self.open_ports)}")
+        if self.nuclei_results:
+            lines.append(f"- **Nuclei findings:** {len(self.nuclei_results)}")
+        if self.dalfox_results:
+            lines.append(f"- **XSS findings (dalfox):** {len(self.dalfox_results)}")
+        if self.subjack_results:
+            lines.append(f"- **Takeover candidates (subjack):** {len(self.subjack_results)}")
+        lines.append("")
 
         # Technologies
         lines.append("## Technologies\n")
@@ -337,6 +442,40 @@ class ResultsAnalyzer:
                 lines.append(f"| {status} | {count} |")
         lines.append("")
 
+        # Open ports
+        if self.open_ports:
+            lines.append("## Open Ports\n")
+            lines.append("| Host | Ports |")
+            lines.append("|------|-------|")
+            for entry in sorted(self.open_ports)[:50]:
+                parts = entry.split(': ', 1)
+                if len(parts) == 2:
+                    lines.append(f"| {parts[0]} | {parts[1]} |")
+                else:
+                    lines.append(f"| {entry} | — |")
+            lines.append("")
+
+        # Nuclei findings
+        if self.nuclei_results:
+            lines.append("## Nuclei Findings\n")
+            for finding in sorted(self.nuclei_results):
+                lines.append(f"- {finding}")
+            lines.append("")
+
+        # Dalfox findings
+        if self.dalfox_results:
+            lines.append("## XSS Findings (dalfox)\n")
+            for finding in self.dalfox_results:
+                lines.append(f"- {finding}")
+            lines.append("")
+
+        # Subjack findings
+        if self.subjack_results:
+            lines.append("## Takeover Candidates (subjack)\n")
+            for finding in self.subjack_results:
+                lines.append(f"- {finding}")
+            lines.append("")
+
         # Save
         with open(output_file, 'w') as f:
             f.write('\n'.join(lines))
@@ -345,7 +484,7 @@ class ResultsAnalyzer:
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Analyze WebEnum results')
+    parser = argparse.ArgumentParser(description='Analyze GivEnum results')
 
     parser.add_argument(
         'results_dir',
@@ -377,6 +516,7 @@ def main():
         analyzer.find_interesting_hosts()
         analyzer.analyze_urls()
         analyzer.find_vulnerabilities()
+        analyzer.analyze_active_findings()
 
     # Export
     if args.export:
