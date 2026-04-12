@@ -357,6 +357,7 @@ pip_install "uro" "uro"
 header "SCANNING TOOLS"
 
 go_install "github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest" "nuclei"
+go_install "github.com/hahwul/dalfox/v2@latest" "dalfox"
 
 if command_exists nuclei; then
     info "Updating Nuclei templates..."
@@ -425,11 +426,9 @@ go_install "github.com/haccer/subjack@latest" "subjack"
 
 header "OPTIONAL TOOLS"
 
-echo -n "Install optional tools (dalfox, sqlmap)? [y/N]: "
+echo -n "Install optional tools (sqlmap)? [y/N]: "
 read -r REPLY
 if [[ "$REPLY" =~ ^[Yy]$ ]]; then
-    go_install "github.com/hahwul/dalfox/v2@latest" "dalfox"
-
     if ! command_exists sqlmap; then
         if [ "$OS" = "darwin" ] && command_exists brew; then
             brew install sqlmap 2>/dev/null && success "sqlmap installed" || pip_install "sqlmap" "sqlmap"
@@ -511,8 +510,8 @@ rm -f "$REQS"
 header "VERIFICATION"
 
 CRITICAL=("subfinder" "httpx" "dnsx")
-RECOMMENDED=("puredns" "massdns" "xurlfind3r" "gau" "waybackurls" "hakrawler" "meg" "nuclei" "sdlookup" "anew" "uro")
-OPTIONAL_LIST=("gowitness" "arjun" "subzy" "dalfox" "goop" "git-dumper" "amass" "findomain")
+RECOMMENDED=("puredns" "massdns" "xurlfind3r" "gau" "waybackurls" "hakrawler" "meg" "nuclei" "dalfox" "sdlookup" "anew" "uro")
+OPTIONAL_LIST=("gowitness" "arjun" "subzy" "goop" "git-dumper" "amass" "findomain")
 
 MISSING_CRITICAL=()
 
