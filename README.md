@@ -618,10 +618,4 @@ This framework orchestrates the following open-source tools:
 
 ---
 
-## License
-
-MIT License - See [LICENSE](LICENSE) file for details
-
----
-
 **Happy Hunting!**
