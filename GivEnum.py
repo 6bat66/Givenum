@@ -441,7 +441,7 @@ class SubdomainEnum:
             'subfinder': ['subfinder', '-d', domain, '-all', '-silent'],
             'assetfinder': ['assetfinder', '--subs-only', domain],
             'findomain': ['findomain', '-t', domain, '-q'],
-            'amass': ['amass', 'enum', '-passive', '-d', domain, '-silent'],
+            'amass': ['amass', 'enum', '-passive', '-d', domain, '-silent', '-timeout', '8'],
             'knockpy': ['knockpy', domain, '--silent'] if ToolChecker.check_tool('knockpy') else None
         }
 

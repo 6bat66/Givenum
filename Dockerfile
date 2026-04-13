@@ -30,8 +30,11 @@ RUN mkdir -p /root/.config/puredns && \
     printf "8.8.8.8\n8.8.4.4\n1.1.1.1\n1.0.0.1\n9.9.9.9\n208.67.222.222\n208.67.220.220\n" \
       > /root/.config/puredns/resolvers.txt
 
-# gau default config — silences the "toml not found" warning and sets safe timeouts
-RUN printf '[providers]\nproviders = ["wayback","commoncrawl","otx","urlscan"]\n\n[config]\nthreads = 1\nretries = 1\ntimeout = 60\nverbose = false\nfp = false\n' \
+# gau default config for VPS/Docker:
+# - commoncrawl: blocked (SSL error on all VPS providers)
+# - wayback: connection refused from datacenter IPs
+# - otx + urlscan: always work
+RUN printf 'threads = 2\nverbose = false\nretries = 1\nsubdomains = false\nparameters = false\nproviders = ["otx","urlscan"]\nblacklist = ["ttf","woff","svg","png","jpg","gif","ico","css","woff2"]\njson = false\n\n[filters]\n  filterstatuscodes = []\n  filtermimetypes = ["image/png", "image/jpg", "image/svg+xml", "image/gif"]\n' \
       > /root/.gau.toml
 
 RUN ARCH=$(uname -m) && \
