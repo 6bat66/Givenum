@@ -44,22 +44,22 @@ function useDeleteWithConfirm() {
 
 export function DeleteJobButton({ jobId, domain, status }: { jobId: string; domain: string; status: string }) {
   const { pending, confirm, error, requestDelete, confirmDelete, cancelConfirm } = useDeleteWithConfirm()
-  const isRunning = status === 'running' || status === 'queued'
+  const isActive = status === 'running' || status === 'queued' || status === 'paused'
 
   return (
     <>
       <button
         type="button"
-        title={isRunning ? 'Pare o job antes de apagar' : 'Apagar job'}
-        disabled={isRunning || pending === jobId}
+        title={isActive ? 'Pare o job antes de apagar' : 'Apagar job'}
+        disabled={isActive || pending === jobId}
         onClick={() => requestDelete('job', jobId, domain)}
         className="text-xs px-2 py-1 rounded"
         style={{
-          background: isRunning ? 'transparent' : '#450a0a',
-          color: isRunning ? 'var(--text-subtle)' : '#fca5a5',
-          border: `1px solid ${isRunning ? 'var(--border)' : '#7f1d1d'}`,
-          opacity: isRunning ? 0.4 : 1,
-          cursor: isRunning ? 'not-allowed' : 'pointer',
+          background: isActive ? 'transparent' : '#450a0a',
+          color: isActive ? 'var(--text-subtle)' : '#fca5a5',
+          border: `1px solid ${isActive ? 'var(--border)' : '#7f1d1d'}`,
+          opacity: isActive ? 0.4 : 1,
+          cursor: isActive ? 'not-allowed' : 'pointer',
         }}>
         {pending === jobId ? '...' : 'Apagar'}
       </button>

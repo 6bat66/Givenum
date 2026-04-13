@@ -33,6 +33,41 @@ function readJson<T>(filePath: string, fallback: T): T {
   }
 }
 
+function isJobStatus(value: unknown): value is ScanJob['status'] {
+  return value === 'queued' ||
+    value === 'running' ||
+    value === 'completed' ||
+    value === 'failed' ||
+    value === 'stopped' ||
+    value === 'paused'
+}
+
+function isScanJobRecord(value: unknown): value is ScanJob {
+  if (!value || typeof value !== 'object') return false
+
+  const job = value as Partial<ScanJob>
+  return typeof job.id === 'string' &&
+    typeof job.projectId === 'string' &&
+    typeof job.projectName === 'string' &&
+    typeof job.domain === 'string' &&
+    (job.mode === 'active' || job.mode === 'passive') &&
+    isJobStatus(job.status) &&
+    typeof job.createdAt === 'string' &&
+    (job.startedAt === null || typeof job.startedAt === 'string') &&
+    (job.endedAt === null || typeof job.endedAt === 'string') &&
+    typeof job.outputBaseDir === 'string' &&
+    (job.scanId === null || typeof job.scanId === 'string') &&
+    (job.scanDir === null || typeof job.scanDir === 'string') &&
+    typeof job.logFile === 'string' &&
+    (job.analysisFile === undefined || job.analysisFile === null || typeof job.analysisFile === 'string') &&
+    (job.returnCode === null || typeof job.returnCode === 'number') &&
+    (job.pid === undefined || job.pid === null || typeof job.pid === 'number') &&
+    Boolean(job.options) &&
+    typeof job.options?.skipScreenshots === 'boolean' &&
+    typeof job.options?.skipPortscan === 'boolean' &&
+    typeof job.options?.skipVulnScan === 'boolean'
+}
+
 function writeJson(filePath: string, data: unknown): boolean {
   try {
     if (!ensureDir(path.dirname(filePath))) {
@@ -228,7 +263,8 @@ export function createJob(input: Omit<ScanJob, 'id' | 'createdAt'>): ScanJob {
 export function getJob(jobId: string): ScanJob | null {
   ensureAppLayout()
   const filePath = path.join(getJobsDir(), `${jobId}.json`)
-  return readJson<ScanJob | null>(filePath, null)
+  const job = readJson<unknown>(filePath, null)
+  return isScanJobRecord(job) ? job : null
 }
 
 export function listJobs(): ScanJob[] {
@@ -237,8 +273,8 @@ export function listJobs(): ScanJob[] {
     return fs
       .readdirSync(getJobsDir())
       .filter((entry) => entry.endsWith('.json'))
-      .map((entry) => readJson<ScanJob | null>(path.join(getJobsDir(), entry), null))
-      .filter((job): job is ScanJob => Boolean(job))
+      .map((entry) => readJson<unknown>(path.join(getJobsDir(), entry), null))
+      .filter(isScanJobRecord)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   } catch {
     return []

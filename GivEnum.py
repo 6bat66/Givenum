@@ -104,7 +104,7 @@ class ToolChecker:
         'utils': ['anew', 'uro', 'unfurl', 'qsreplace', 'freq'],
         'scanning': ['nuclei', 'sdlookup'],
         'git': ['goop', 'git-dumper'],
-        'optional': ['gowitness', 'subzy', 'subjack', 'dalfox', 'sqlmap', 'arjun']
+        'optional': ['gowitness', 'subzy', 'subjack', 'dalfox', 'sqlmap', 'arjun', 'photon']
     }
 
     @staticmethod
@@ -132,7 +132,11 @@ class ToolChecker:
                 continue
 
             for tool in tools:
-                if cls.check_tool(tool):
+                available_for_tool = cls.check_tool(tool)
+                if tool == 'photon':
+                    available_for_tool = available_for_tool or cls.check_python_module('photon')
+
+                if available_for_tool:
                     available.append(tool)
                 else:
                     missing.append(tool)
@@ -147,6 +151,17 @@ def count_nonempty_lines(file_path: Path) -> int:
 
     with open(file_path, 'r') as f:
         return sum(1 for line in f if line.strip())
+
+
+def matches_domain(hostname: str, domain: str) -> bool:
+    """Return True when hostname is the root domain or one of its subdomains."""
+    candidate = hostname.strip().rstrip('.').lower()
+    root = domain.strip().rstrip('.').lower()
+
+    if candidate.startswith('*.'):
+        candidate = candidate[2:]
+
+    return bool(candidate) and (candidate == root or candidate.endswith(f".{root}"))
 
 
 # Module-level tool execution log — reset at scan start via reset_tool_log()
@@ -272,10 +287,13 @@ class CertificateTransparency:
                 
                 for entry in data:
                     name = entry.get('name_value', '')
-                    for domain in name.split('\n'):
-                        domain = domain.strip().replace('*', '').replace('.', '', 1) if domain.startswith('*.') else domain.strip()
-                        if domain and domain.endswith(self.domain):
-                            domains.add(domain)
+                    for candidate in name.split('\n'):
+                        normalized = candidate.strip()
+                        if normalized.startswith('*.'):
+                            normalized = normalized[2:]
+                        normalized = normalized.rstrip('.')
+                        if matches_domain(normalized, self.domain):
+                            domains.add(normalized)
                 
                 output_file = self.output_mgr.get_path('subdomains', 'crtsh.txt')
                 with open(output_file, 'w') as f:
@@ -308,8 +326,9 @@ class CertificateTransparency:
                 
                 for entry in data:
                     for name in entry.get('dns_names', []):
-                        if name.endswith(self.domain):
-                            domains.add(name)
+                        normalized = name.strip().rstrip('.')
+                        if matches_domain(normalized, self.domain):
+                            domains.add(normalized.lstrip('*.'))
                 
                 output_file = self.output_mgr.get_path('subdomains', 'certspotter.txt')
                 with open(output_file, 'w') as f:
@@ -342,25 +361,42 @@ class PassiveAPIs:
         Logger.info("Querying VirusTotal...")
         
         try:
-            url = f"https://www.virustotal.com/vtapi/v2/domain/report"
-            params = {'apikey': api_key, 'domain': self.domain}
-            response = requests.get(url, params=params, timeout=30)
-            
-            if response.status_code == 200:
+            headers = {
+                'accept': 'application/json',
+                'x-apikey': api_key,
+            }
+            url = f"https://www.virustotal.com/api/v3/domains/{self.domain}/subdomains?limit=40"
+
+            domains = set()
+            pages = []
+            page_count = 0
+            while url and page_count < 10:
+                response = requests.get(url, headers=headers, timeout=30)
+                if response.status_code != 200:
+                    Logger.warning(f"VirusTotal returned status {response.status_code}")
+                    break
+
                 data = response.json()
-                domains = set(data.get('subdomains', []))
-                
-                output_file = self.output_mgr.get_path('api_data', 'virustotal.txt')
-                with open(output_file, 'w') as f:
-                    f.write('\n'.join(sorted(domains)) + '\n')
-                
-                json_file = self.output_mgr.get_path('api_data', 'virustotal.json')
-                with open(json_file, 'w') as f:
-                    json.dump(data, f, indent=2)
-                
-                Logger.success(f"VirusTotal: {len(domains)} domains")
-                return domains
-                
+                pages.append(data)
+                for entry in data.get('data', []):
+                    domain = entry.get('id', '')
+                    if domain and (domain == self.domain or domain.endswith(f".{self.domain}")):
+                        domains.add(domain)
+
+                url = data.get('links', {}).get('next')
+                page_count += 1
+
+            output_file = self.output_mgr.get_path('api_data', 'virustotal.txt')
+            with open(output_file, 'w') as f:
+                f.write('\n'.join(sorted(domains)) + '\n')
+
+            json_file = self.output_mgr.get_path('api_data', 'virustotal.json')
+            with open(json_file, 'w') as f:
+                json.dump({'pages': pages, 'count': len(domains)}, f, indent=2)
+
+            Logger.success(f"VirusTotal: {len(domains)} domains")
+            return domains
+                 
         except Exception as e:
             Logger.error(f"Error querying VirusTotal: {e}")
         
@@ -380,8 +416,9 @@ class PassiveAPIs:
                 
                 for entry in data.get('passive_dns', []):
                     hostname = entry.get('hostname', '')
-                    if hostname.endswith(self.domain):
-                        domains.add(hostname)
+                    normalized = hostname.strip().rstrip('.')
+                    if matches_domain(normalized, self.domain):
+                        domains.add(normalized)
                 
                 output_file = self.output_mgr.get_path('api_data', 'alienvault.txt')
                 with open(output_file, 'w') as f:
@@ -468,7 +505,10 @@ class SubdomainEnum:
             with open(output_file, 'w') as f:
                 f.write('\n'.join(sorted(subs)) + '\n')
 
-            Logger.success(f"{tool_name}: {len(subs)} subdomains")
+            if result.returncode == 0:
+                Logger.success(f"{tool_name}: {len(subs)} subdomains")
+            else:
+                Logger.warning(f"{tool_name}: rc={result.returncode}, recovered {len(subs)} subdomains")
             return subs
 
         except subprocess.TimeoutExpired:
@@ -487,16 +527,29 @@ class SubdomainEnum:
         Logger.info("Running uncover (multi-engine OSINT)...")
         output_file = self.output_mgr.get_path('subdomains', 'uncover.txt')
 
-        # Build engine list based on configured keys
-        engine_keys = {
-            'shodan':  self.api_config.get_key('shodan'),
-            'censys':  self.api_config.get_key('censys_id'),
-            'fofa':    self.api_config.get_key('fofa_email'),
-            'hunter':  self.api_config.get_key('hunter'),
-            'netlas':  self.api_config.get_key('netlas'),
-        }
-        # Always try shodan (InternetDB needs no key); include keyed engines when available
-        engines = ['shodan'] + [e for e, k in engine_keys.items() if k and e != 'shodan']
+        shodan_key = self.api_config.get_key('shodan')
+        censys_id = self.api_config.get_key('censys_id')
+        censys_secret = self.api_config.get_key('censys_secret')
+        fofa_email = self.api_config.get_key('fofa_email')
+        fofa_key = self.api_config.get_key('fofa_key')
+        hunter_key = self.api_config.get_key('hunter')
+        netlas_key = self.api_config.get_key('netlas')
+
+        engines = []
+        if shodan_key:
+            engines.append('shodan')
+        if censys_id and censys_secret:
+            engines.append('censys')
+        if fofa_email and fofa_key:
+            engines.append('fofa')
+        if hunter_key:
+            engines.append('hunter')
+        if netlas_key:
+            engines.append('netlas')
+
+        if not engines:
+            Logger.info("Skipping uncover: no compatible engine credentials configured")
+            return set()
 
         try:
             _t0 = time.time()
@@ -504,6 +557,7 @@ class SubdomainEnum:
                 'uncover',
                 '-q', f'ssl:"{self.domain}"',
                 '-e', ','.join(engines),
+                '-f', 'host',
                 '-silent', '-o', str(output_file),
             ]
             # Pass API keys via environment variables (uncover reads these natively)
@@ -523,6 +577,10 @@ class SubdomainEnum:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=300, env=env)
             _track_captured('uncover', result, _t0, self.output_mgr.dirs['logs'])
 
+            if result.returncode != 0:
+                Logger.warning(f"uncover exited with rc={result.returncode}")
+                return set()
+
             if not output_file.exists():
                 return set()
 
@@ -533,7 +591,7 @@ class SubdomainEnum:
             subs = set()
             for entry in raw:
                 host = entry.split(':')[0] if ':' in entry else entry
-                if host and self.domain in host and not host[0].isdigit():
+                if host and not host[0].isdigit() and matches_domain(host, self.domain):
                     subs.add(host.lstrip('*.'))
 
             Logger.success(f"uncover: {len(subs)} hosts via {','.join(engines)}")
@@ -765,7 +823,7 @@ class DNSResolver:
             domain_root = self.output_mgr.domain
             subs = set(
                 d.lstrip('*.') for d in raw
-                if d and not d[0].isdigit() and domain_root in d
+                if d and not d[0].isdigit() and matches_domain(d, domain_root)
             )
 
             with open(output_file, 'w') as f:
@@ -807,7 +865,7 @@ class PortScanner:
                 return
             
             with open(a_records_file, 'r') as f:
-                ips = [line.strip() for line in f if line.strip()]
+                ips = sorted({line.strip() for line in f if line.strip()})
             
             if not ips:
                 Logger.warning("No IPs to scan")
@@ -873,6 +931,7 @@ class HTTPProber:
                 '-status-code',
                 '-title',
                 '-tech-detect',
+                '-ip',
                 '-cdn',
                 '-cname',
                 '-content-length',
@@ -1002,6 +1061,25 @@ class URLCollector:
             f.write(f"\n=== {header} ===\n")
             f.write(content.rstrip() + '\n')
 
+    @staticmethod
+    def _summarize_batch_status(total: int, failures: int, timeouts: int) -> Tuple[str, int]:
+        if total <= 0:
+            return 'ok', 0
+        if failures + timeouts < total:
+            return 'ok', 0
+        if timeouts and failures == 0:
+            return 'timeout', -1
+        return 'fail', 1
+
+    @staticmethod
+    def _parse_meg_urls(content: str) -> Set[str]:
+        urls = set()
+        for line in content.splitlines():
+            match = re.search(r'(https?://\S+)\s+\((\d{3})\b', line.strip())
+            if match and match.group(2) == '200':
+                urls.add(match.group(1))
+        return urls
+
     def collect_with_xurlfind3r(self, input_file: Path) -> Set[str]:
         """Collect URLs using xurlfind3r (modern, efficient)"""
         if not ToolChecker.check_tool('xurlfind3r'):
@@ -1055,9 +1133,10 @@ class URLCollector:
                     self._append_log(log_file, f"{domain} (error)", str(e))
                     Logger.warning(f"xurlfind3r error on {domain}: {e}")
 
+            status, rc = self._summarize_batch_status(len(domains), failures, timeouts)
             _tool_log['xurlfind3r'] = {
-                'status': 'ok' if all_urls or failures + timeouts < len(domains) else 'fail',
-                'rc': 0 if all_urls else (-1 if timeouts else 1),
+                'status': status,
+                'rc': rc,
                 'elapsed': round(time.time() - _t0, 1),
                 'hosts': len(domains),
                 'timeouts': timeouts,
@@ -1097,7 +1176,7 @@ class URLCollector:
             for idx, host in enumerate(hosts[:50], start=1):
                 try:
                     result = subprocess.run(
-                        ['katana', '-u', host, '-silent', '-depth', '2',
+                        ['katana', '-u', host, '-silent', '-depth', '2', '-jc',
                          '-timeout', '10', '-rate-limit', '150'],
                         capture_output=True,
                         text=True,
@@ -1187,9 +1266,10 @@ class URLCollector:
                         failures += 1
                         Logger.warning(f"gau error on {domain}: {e}")
 
+                status, rc = self._summarize_batch_status(len(archive_targets), failures, timeouts)
                 _tool_log['gau'] = {
-                    'status': 'ok' if urls else ('timeout' if timeouts else 'fail'),
-                    'rc': 0 if urls else -1,
+                    'status': status,
+                    'rc': rc,
                     'elapsed': round(time.time() - _t0, 1),
                     'timeouts': timeouts,
                     'failures': failures,
@@ -1245,9 +1325,10 @@ class URLCollector:
                         failures += 1
                         Logger.warning(f"waybackurls error on {domain}: {e}")
 
+                status, rc = self._summarize_batch_status(len(archive_targets), failures, timeouts)
                 _tool_log['waybackurls'] = {
-                    'status': 'ok' if urls else ('timeout' if timeouts else 'fail'),
-                    'rc': 0 if urls else -1,
+                    'status': status,
+                    'rc': rc,
                     'elapsed': round(time.time() - _t0, 1),
                     'timeouts': timeouts,
                     'failures': failures,
@@ -1306,6 +1387,7 @@ class URLCollector:
 
         meg_dir = self.output_mgr.get_path('urls', 'meg_out')
         meg_dir.mkdir(exist_ok=True)
+        log_file = self.output_mgr.get_path('logs', 'meg.log')
 
         # Common paths worth probing
         interesting_paths = [
@@ -1320,24 +1402,21 @@ class URLCollector:
             f.write('\n'.join(interesting_paths) + '\n')
 
         try:
-            run_logged('meg', ['meg', '-d', '1000', '-v', str(paths_file), str(input_file), str(meg_dir)],
-                       self.output_mgr.dirs['logs'], timeout=600)
+            _t0 = time.time()
+            result = subprocess.run(
+                ['meg', '-d', '1000', '-s', '200', '-v', str(paths_file), str(input_file), str(meg_dir)],
+                capture_output=True,
+                text=True,
+                timeout=600
+            )
+            _track_captured('meg', result, _t0, self.output_mgr.dirs['logs'])
+            self._append_log(log_file, f"meg stdout (rc={result.returncode})", result.stdout)
 
-            # Collect 200 responses
-            found = set()
-            for out_file in meg_dir.rglob('*'):
-                if out_file.is_file():
-                    try:
-                        with open(out_file, 'r', errors='ignore') as f:
-                            content = f.read()
-                        if content.startswith('HTTP/') and ' 200 ' in content.split('\n')[0]:
-                            # First line of meg output: "HTTP/1.1 200 OK || https://host/path"
-                            first = content.split('\n')[0]
-                            if '||' in first:
-                                url = first.split('||')[1].strip()
-                                found.add(url)
-                    except Exception:
-                        pass
+            found = self._parse_meg_urls(result.stdout)
+            index_file = meg_dir / 'index'
+            if index_file.exists():
+                with open(index_file, 'r', errors='ignore') as f:
+                    found.update(self._parse_meg_urls(f.read()))
 
             results_file = self.output_mgr.get_path('urls', 'meg_found.txt')
             with open(results_file, 'w') as f:
@@ -1441,12 +1520,13 @@ class URLCollector:
 
         Logger.info(f"Raw URLs: {len(urls)}")
 
-        if not ToolChecker.check_tool('uro'):
-            Logger.warning("uro not found")
-            return
-
-        # Clean with uro
         clean_file = self.output_mgr.get_path('urls', 'urls_clean.txt')
+
+        if not ToolChecker.check_tool('uro'):
+            Logger.warning("uro not found — using raw URL set as cleaned output")
+            with open(clean_file, 'w') as f:
+                f.write('\n'.join(sorted(urls)) + '\n')
+            return
 
         try:
             _t0 = time.time()
@@ -1460,14 +1540,21 @@ class URLCollector:
                 )
             _track_captured('uro', result, _t0, self.output_mgr.dirs['logs'])
 
-            with open(clean_file, 'w') as f:
-                f.write(result.stdout)
+            cleaned_urls = [line.strip() for line in result.stdout.split('\n') if line.strip()]
+            if result.returncode != 0 or not cleaned_urls:
+                Logger.warning("uro returned no cleaned URLs — falling back to raw URL set")
+                cleaned_urls = sorted(urls)
 
-            cleaned_count = len([l for l in result.stdout.split('\n') if l.strip()])
+            with open(clean_file, 'w') as f:
+                f.write('\n'.join(cleaned_urls) + '\n')
+
+            cleaned_count = len(cleaned_urls)
             Logger.success(f"Cleaned URLs: {cleaned_count}")
 
         except Exception as e:
             Logger.error(f"Error in uro: {e}")
+            with open(clean_file, 'w') as f:
+                f.write('\n'.join(sorted(urls)) + '\n')
 
 
 class JSAnalyzer:
@@ -1486,14 +1573,12 @@ class JSAnalyzer:
         
         try:
             _t0 = time.time()
-            with open(input_file, 'r') as f:
-                result = subprocess.run(
-                    ['subjs'],
-                    stdin=f,
-                    capture_output=True,
-                    text=True,
-                    timeout=300
-                )
+            result = subprocess.run(
+                ['subjs', '-i', str(input_file)],
+                capture_output=True,
+                text=True,
+                timeout=300
+            )
             _track_captured('subjs', result, _t0, self.output_mgr.dirs['logs'])
 
             js_urls = set(line.strip() for line in result.stdout.split('\n') if line.strip())
@@ -1558,13 +1643,9 @@ class JSAnalyzer:
             getjs_file = self.output_mgr.get_path('js', 'getjs.txt')
             
             try:
-                with open(alive_file, 'r') as f:
-                    urls = f.read()
-                
                 _t0 = time.time()
                 result = subprocess.run(
-                    ['getJS', '--input', '-', '--complete'],
-                    input=urls,
+                    ['getJS', '--input', str(alive_file), '--complete'],
                     capture_output=True,
                     text=True,
                     timeout=600
@@ -1586,6 +1667,9 @@ class JSAnalyzer:
         all_js_file = self.output_mgr.get_path('js', 'all_js_files.txt')
         with open(all_js_file, 'w') as f:
             f.write('\n'.join(sorted(all_js)) + '\n')
+
+        if all_js:
+            self.download_js_files(all_js)
         
         # Analyze with jsubfinder
         if all_js:
@@ -1595,6 +1679,66 @@ class JSAnalyzer:
         self.scan_secrets_with_trufflehog()
 
         return all_js
+
+    def download_js_files(self, js_urls: Set[str], limit: int = 50, max_bytes: int = 2_000_000):
+        """Download a capped subset of discovered JS files for local inspection/secret scanning."""
+        Logger.info(f"Downloading up to {limit} JS files for local analysis...")
+
+        download_dir = self.output_mgr.get_path('js', 'downloaded')
+        download_dir.mkdir(exist_ok=True)
+        _t0 = time.time()
+        downloaded = 0
+        failures = 0
+
+        session = requests.Session()
+        headers = {'User-Agent': 'GivEnum/1.0 (+https://github.com/6bat66/Givenum)'}
+
+        for url in sorted(js_urls)[:limit]:
+            try:
+                response = session.get(url, headers=headers, timeout=15, stream=True)
+                if response.status_code != 200:
+                    failures += 1
+                    continue
+
+                content_type = response.headers.get('content-type', '').lower()
+                url_path = urlparse(url).path.lower()
+                if 'javascript' not in content_type and not url_path.endswith(('.js', '.mjs', '.cjs')):
+                    failures += 1
+                    continue
+
+                chunks = bytearray()
+                for chunk in response.iter_content(chunk_size=8192):
+                    if not chunk:
+                        continue
+                    chunks.extend(chunk)
+                    if len(chunks) > max_bytes:
+                        chunks = bytearray()
+                        break
+
+                if not chunks:
+                    failures += 1
+                    continue
+
+                name = Path(urlparse(url).path).name or 'script.js'
+                safe_name = re.sub(r'[^A-Za-z0-9._-]', '_', name)[:80] or 'script.js'
+                digest = hashlib.sha1(url.encode('utf-8')).hexdigest()[:12]
+                output_file = download_dir / f"{digest}_{safe_name}"
+                with open(output_file, 'wb') as f:
+                    f.write(chunks)
+                downloaded += 1
+
+            except Exception:
+                failures += 1
+
+        _tool_log['js_download'] = {
+            'status': 'ok' if downloaded > 0 or failures == 0 else 'fail',
+            'rc': 0 if downloaded > 0 else (1 if failures else 0),
+            'elapsed': round(time.time() - _t0, 1),
+            'downloaded': downloaded,
+            'failures': failures,
+        }
+
+        Logger.success(f"Downloaded {downloaded} JS files (failures={failures})")
 
     def scan_secrets_with_trufflehog(self):
         """Scan downloaded JS and git dumps for secrets with trufflehog"""
@@ -1855,17 +1999,23 @@ class CloudDetector:
     def detect(self, input_file: Path):
         """Detect cloud services"""
         Logger.header("CLOUD SERVICE DETECTION")
-        
+
+        hosts = []
         with open(input_file, 'r') as f:
-            hosts = [line.strip() for line in f if line.strip()]
-        
-        cloud_services = {'AWS': [], 'Azure': [], 'GCP': []}
-        
+            hosts.extend(line.strip() for line in f if line.strip())
+
+        cname_records_file = self.output_mgr.get_path('dns', 'cname_records.txt')
+        if cname_records_file.exists():
+            with open(cname_records_file, 'r') as f:
+                hosts.extend(line.strip() for line in f if line.strip())
+
+        cloud_services = {'AWS': set(), 'Azure': set(), 'GCP': set()}
+
         for host in hosts:
             for cloud, patterns in self.cloud_patterns.items():
                 for pattern in patterns:
                     if re.search(pattern, host, re.IGNORECASE):
-                        cloud_services[cloud].append(host)
+                        cloud_services[cloud].add(host)
                         break
         
         # Save results
@@ -1873,7 +2023,7 @@ class CloudDetector:
             if services:
                 output_file = self.output_mgr.get_path('cloud', f'{cloud.lower()}_services.txt')
                 with open(output_file, 'w') as f:
-                    f.write('\n'.join(services) + '\n')
+                    f.write('\n'.join(sorted(services)) + '\n')
                 Logger.success(f"{cloud}: {len(services)} services")
 
 
@@ -2178,7 +2328,8 @@ class DiffManager:
                  notifier: 'NotificationManager' = None):
         self.output_mgr = output_mgr
         self.domain = domain
-        self.results_base = self.output_mgr.base_dir.parent.resolve()
+        self.current_scan_dir = self.output_mgr.base_dir.resolve()
+        self.results_base = self.current_scan_dir.parent
         self.notifier = notifier
 
     def find_previous_scan(self) -> Optional[Path]:
@@ -2187,7 +2338,7 @@ class DiffManager:
             return None
         domain_scans = sorted([
             d for d in self.results_base.iterdir()
-            if d.is_dir() and d.name.startswith(f"{self.domain}_") and d != self.output_mgr.base_dir
+            if d.is_dir() and d.name.startswith(f"{self.domain}_") and d.resolve() != self.current_scan_dir
         ], reverse=True)
         return domain_scans[0] if domain_scans else None
 
@@ -2465,9 +2616,12 @@ class GivEnum:
                         f.write(sub + '\n')
                 # Also merge into all_subdomains.txt
                 all_subs_file = self.output_mgr.get_path('subdomains', 'all_subdomains.txt')
-                with open(all_subs_file, 'a') as f:
-                    for sub in sorted(new_from_tls):
-                        f.write(sub + '\n')
+                existing_all = set()
+                if all_subs_file.exists():
+                    with open(all_subs_file) as f:
+                        existing_all = set(line.strip() for line in f if line.strip())
+                with open(all_subs_file, 'w') as f:
+                    f.write('\n'.join(sorted(existing_all | new_from_tls)) + '\n')
 
         if count_nonempty_lines(resolved_file) == 0:
             Logger.warning("No resolved subdomains found, stopping after DNS phase")
@@ -2499,7 +2653,7 @@ class GivEnum:
         all_urls = self.url_collector.collect_from_archives(alive_file)
 
         # 8. Probe common paths with meg
-        self.url_collector.probe_paths_with_meg(alive_file)
+        all_urls.update(self.url_collector.probe_paths_with_meg(alive_file))
 
         # 9. Photon crawl (first 5 alive hosts to avoid excess)
         try:
@@ -2551,6 +2705,7 @@ class GivEnum:
         # 18. Generate reports
         self.report_generator.generate_markdown_report(scan_mode='active' if active else 'passive')
         self.report_generator.generate_json_report(scan_mode='active' if active else 'passive')
+        self._generate_analysis_report()
 
         # Summary
         self._print_summary(time.time() - start_time)
@@ -2560,8 +2715,37 @@ class GivEnum:
         self.diff_manager.diff_results()
         self.report_generator.generate_markdown_report(scan_mode='active' if active else 'passive')
         self.report_generator.generate_json_report(scan_mode='active' if active else 'passive')
+        self._generate_analysis_report()
         elapsed = time.time() - start_time
         self._print_summary(elapsed)
+
+    def _generate_analysis_report(self):
+        """Generate analysis.md using the standalone analyzer when available."""
+        analyzer_script = Path(__file__).with_name('analyze_results.py')
+        if not analyzer_script.exists():
+            Logger.warning("analyze_results.py not found — skipping analysis.md generation")
+            return
+
+        analysis_file = self.output_mgr.get_path('reports', 'analysis.md')
+        Logger.info("Generating analysis report...")
+
+        try:
+            _t0 = time.time()
+            result = subprocess.run(
+                [sys.executable, '-u', str(analyzer_script), str(self.output_mgr.base_dir), '--export', str(analysis_file)],
+                capture_output=True,
+                text=True,
+                timeout=300
+            )
+            _track_captured('analyze_results', result, _t0, self.output_mgr.dirs['logs'])
+
+            if result.returncode == 0 and analysis_file.exists():
+                Logger.success(f"Analysis: {analysis_file}")
+            else:
+                Logger.warning("Analysis report generation did not complete successfully")
+
+        except Exception as e:
+            Logger.warning(f"Error generating analysis report: {e}")
 
     def _print_summary(self, elapsed_time: float):
         """Print final summary"""
@@ -2584,6 +2768,9 @@ class GivEnum:
         Logger.success(f"\nTime: {elapsed_time/60:.2f} minutes")
         Logger.success(f"Results: {self.output_mgr.base_dir}")
         Logger.info(f"Report: {self.output_mgr.get_path('reports', 'report.md')}")
+        analysis_file = self.output_mgr.get_path('reports', 'analysis.md')
+        if analysis_file.exists():
+            Logger.info(f"Analysis: {analysis_file}")
 
         # Tool execution summary
         if _tool_log:

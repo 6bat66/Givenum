@@ -18,6 +18,9 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   }
 
   try {
+    if (job.status === 'paused') {
+      process.kill(job.pid, 'SIGCONT')
+    }
     process.kill(job.pid, 'SIGTERM')
   } catch {
     // Process may have already exited

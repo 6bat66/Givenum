@@ -14,11 +14,15 @@ from pathlib import Path
 from typing import Optional, Set
 
 
-def load_job(job_file: Path) -> dict:
+def load_job(job_file: Path) -> Optional[dict]:
     if not job_file.exists():
-        return {}
-    with open(job_file, 'r') as f:
-        return json.load(f)
+        return None
+    try:
+        with open(job_file, 'r') as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
 
 
 def save_job(job_file: Path, data: dict):
@@ -27,10 +31,13 @@ def save_job(job_file: Path, data: dict):
         json.dump(data, f, indent=2)
 
 
-def update_job(job_file: Path, **fields):
+def update_job(job_file: Path, **fields) -> bool:
     job = load_job(job_file)
+    if not job:
+        return False
     job.update(fields)
     save_job(job_file, job)
+    return True
 
 
 def find_scan_dir(base_output_dir: Path, domain: str, before: Set[str]) -> Optional[Path]:
@@ -75,14 +82,16 @@ def main():
     log_file.parent.mkdir(parents=True, exist_ok=True)
 
     before = {entry.name for entry in output_dir.iterdir() if entry.is_dir()} if output_dir.exists() else set()
-    update_job(
+    if not update_job(
         job_file,
         status='running',
         startedAt=datetime.utcnow().isoformat() + 'Z',
         endedAt=None,
         returnCode=None,
         logFile=str(log_file),
-    )
+    ):
+        print(f"Job file missing or invalid, aborting: {job_file}", file=sys.stderr)
+        return
 
     cmd = [
         sys.executable,
@@ -127,9 +136,15 @@ def main():
                 env=env,
             )
 
+    current_job = load_job(job_file)
+    if current_job and current_job.get('status') == 'stopped':
+        final_status = 'stopped'
+    else:
+        final_status = 'completed' if process.returncode == 0 else 'failed'
+
     update_job(
         job_file,
-        status='completed' if process.returncode == 0 else 'failed',
+        status=final_status,
         endedAt=datetime.utcnow().isoformat() + 'Z',
         returnCode=process.returncode,
         pid=None,

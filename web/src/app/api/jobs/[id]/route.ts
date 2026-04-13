@@ -24,8 +24,8 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
     return NextResponse.json({ error: 'Job not found' }, { status: 404 })
   }
 
-  if (job.status === 'running' || job.status === 'queued') {
-    return NextResponse.json({ error: 'Cannot delete a running job. Stop it first.' }, { status: 409 })
+  if (job.status === 'running' || job.status === 'queued' || job.status === 'paused') {
+    return NextResponse.json({ error: 'Cannot delete an active job. Stop it first.' }, { status: 409 })
   }
 
   deleteJob(id)

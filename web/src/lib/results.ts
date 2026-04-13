@@ -238,7 +238,7 @@ export function getScan(scanId: string): ScanData | null {
     status: (row.status_code as number) || 0,
     title: (row.title as string) || '',
     tech: (row.tech as string[]) || [],
-    ip: (row.host as string) || '',
+    ip: (row.host_ip as string) || ((row.a as string[] | undefined)?.[0] ?? '') || '',
     contentLength: (row.content_length as number) || 0,
   }))
 

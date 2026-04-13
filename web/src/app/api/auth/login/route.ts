@@ -38,13 +38,14 @@ export async function POST(req: Request) {
   }
 
   const token = signToken(password)
-  const isProduction = process.env.NODE_ENV === 'production'
+  const forwardedProto = req.headers.get('x-forwarded-proto')?.split(',')[0]?.trim()
+  const isSecureRequest = new URL(req.url).protocol === 'https:' || forwardedProto === 'https'
 
   const res = NextResponse.json({ ok: true })
   res.cookies.set(COOKIE_NAME, token, {
     httpOnly: true,
     sameSite: 'lax',
-    secure: isProduction,
+    secure: isSecureRequest,
     maxAge: COOKIE_MAX_AGE,
     path: '/',
   })
