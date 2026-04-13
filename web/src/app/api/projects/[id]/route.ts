@@ -11,11 +11,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
 
-  if (id === 'default') {
-    return NextResponse.json({ error: 'Cannot delete the default project' }, { status: 400 })
-  }
+  const project = getProject(id)
+  if (!project) return NextResponse.json({ error: 'Project not found' }, { status: 404 })
 
   const ok = deleteProject(id)
-  if (!ok) return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+  if (!ok) return NextResponse.json({ error: 'Falha ao apagar projeto' }, { status: 500 })
   return NextResponse.json({ ok: true })
 }

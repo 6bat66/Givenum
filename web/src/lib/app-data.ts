@@ -94,6 +94,21 @@ function getJobsDir(): string {
   return path.join(getConfigDir(), 'jobs')
 }
 
+function getHiddenProjectsFile(): string {
+  return path.join(getConfigDir(), 'hidden_projects.json')
+}
+
+function isProjectHidden(projectId: string): boolean {
+  const hidden = readJson<string[]>(getHiddenProjectsFile(), [])
+  return hidden.includes(projectId)
+}
+
+function hideProject(projectId: string): boolean {
+  const hidden = readJson<string[]>(getHiddenProjectsFile(), [])
+  if (hidden.includes(projectId)) return true
+  return writeJson(getHiddenProjectsFile(), [...hidden, projectId])
+}
+
 export function getApiKeysFile(): string {
   return process.env.GIVENUM_API_KEYS_FILE || path.join(getConfigDir(), 'api_keys.json')
 }
@@ -113,16 +128,19 @@ export function ensureAppLayout() {
 export function listProjects(): ProjectMeta[] {
   ensureAppLayout()
   const projects = readJson<ProjectMeta[]>(getProjectsFile(), [])
-  const defaultProject: ProjectMeta = {
-    id: DEFAULT_PROJECT_ID,
-    name: 'Default',
-    description: 'Scans not assigned to a custom project',
-    createdAt: new Date(0).toISOString(),
-    resultsPath: getDefaultProjectResultsDir(),
-  }
 
   const deduped = new Map<string, ProjectMeta>()
-  deduped.set(defaultProject.id, defaultProject)
+
+  if (!isProjectHidden(DEFAULT_PROJECT_ID)) {
+    const defaultProject: ProjectMeta = {
+      id: DEFAULT_PROJECT_ID,
+      name: 'Default',
+      description: 'Scans not assigned to a custom project',
+      createdAt: new Date(0).toISOString(),
+      resultsPath: getDefaultProjectResultsDir(),
+    }
+    deduped.set(defaultProject.id, defaultProject)
+  }
 
   for (const project of projects) {
     deduped.set(project.id, {
@@ -251,7 +269,9 @@ export function deleteJob(jobId: string): boolean {
 }
 
 export function deleteProject(projectId: string): boolean {
-  if (projectId === DEFAULT_PROJECT_ID) return false
+  if (projectId === DEFAULT_PROJECT_ID) {
+    return hideProject(DEFAULT_PROJECT_ID)
+  }
   const projects = readJson<ProjectMeta[]>(getProjectsFile(), [])
   const filtered = projects.filter((project) => project.id !== projectId)
   if (filtered.length === projects.length) return false

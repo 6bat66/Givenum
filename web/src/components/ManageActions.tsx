@@ -99,23 +99,16 @@ export function DeleteScanButton({ scanId, domain }: { scanId: string; domain: s
 
 export function DeleteProjectButton({ projectId, name }: { projectId: string; name: string }) {
   const { pending, confirm, error, requestDelete, confirmDelete, cancelConfirm } = useDeleteWithConfirm()
-  const isDefault = projectId === 'default'
 
   return (
     <>
       <button
         type="button"
-        title={isDefault ? 'Não é possível apagar o projeto padrão' : 'Apagar projeto'}
-        disabled={isDefault || pending === projectId}
+        title="Apagar projeto"
+        disabled={pending === projectId}
         onClick={() => requestDelete('project', projectId, name)}
         className="text-xs px-2 py-1 rounded"
-        style={{
-          background: isDefault ? 'transparent' : '#450a0a',
-          color: isDefault ? 'var(--text-subtle)' : '#fca5a5',
-          border: `1px solid ${isDefault ? 'var(--border)' : '#7f1d1d'}`,
-          opacity: isDefault ? 0.4 : 1,
-          cursor: isDefault ? 'not-allowed' : 'pointer',
-        }}>
+        style={{ background: '#450a0a', color: '#fca5a5', border: '1px solid #7f1d1d' }}>
         {pending === projectId ? '...' : 'Apagar'}
       </button>
       {error && <span className="text-xs" style={{ color: '#f87171' }}>{error}</span>}
