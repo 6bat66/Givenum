@@ -120,12 +120,11 @@ def main():
         proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, env=env)
         update_job(job_file, pid=proc.pid)
         proc.wait()
-        process = proc
-        log.write(f"\n[{datetime.utcnow().isoformat()}Z] Job finished with rc={process.returncode}\n")
+        log.write(f"\n[{datetime.utcnow().isoformat()}Z] Job finished with rc={proc.returncode}\n")
 
     scan_dir = find_scan_dir(output_dir, args.domain, before)
     analysis_file = None
-    if process.returncode == 0 and scan_dir:
+    if proc.returncode == 0 and scan_dir:
         analysis_file = scan_dir / 'reports' / 'analysis.md'
         with open(log_file, 'a') as log:
             log.write(f"\n[{datetime.utcnow().isoformat()}Z] Running analyzer\n")
@@ -140,13 +139,13 @@ def main():
     if current_job and current_job.get('status') == 'stopped':
         final_status = 'stopped'
     else:
-        final_status = 'completed' if process.returncode == 0 else 'failed'
+        final_status = 'completed' if proc.returncode == 0 else 'failed'
 
     update_job(
         job_file,
         status=final_status,
         endedAt=datetime.utcnow().isoformat() + 'Z',
-        returnCode=process.returncode,
+        returnCode=proc.returncode,
         pid=None,
         scanId=encode_scan_id(scan_dir, results_dir) if scan_dir else None,
         scanDir=str(scan_dir) if scan_dir else None,

@@ -47,18 +47,14 @@ RUN ARCH=$(uname -m) && \
     curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${GOARCH}.tar.gz" \
       | tar -C /usr/local -xz
 
-RUN python3 -m pip install --break-system-packages -q \
-    requests>=2.31.0 \
-    beautifulsoup4>=4.12.0 \
-    lxml>=4.9.0 \
-    urllib3>=2.0.0 \
-    dnspython>=2.4.0 \
-    flask>=3.0.0 \
-    knockpy \
-    uro \
-    git-dumper \
-    arjun \
-    photon-scanner 2>/dev/null || true
+COPY requirements.txt /tmp/requirements.txt
+
+RUN python3 -m pip install --break-system-packages -q -r /tmp/requirements.txt
+
+RUN for pkg in knockpy uro git-dumper arjun photon-scanner; do \
+      python3 -m pip install --break-system-packages -q "$pkg" 2>/dev/null \
+        || echo "[!] $pkg install failed (non-critical)"; \
+    done && rm -f /tmp/requirements.txt
 
 RUN go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest && \
     go install github.com/tomnomnom/assetfinder@latest && \

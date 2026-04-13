@@ -9,7 +9,11 @@ export default function LogoutButton() {
 
   async function handleLogout() {
     setLoading(true)
-    await fetch('/api/auth/logout', { method: 'POST' })
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' })
+    } finally {
+      setLoading(false)
+    }
     router.replace('/login')
   }
 

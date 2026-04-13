@@ -2128,7 +2128,6 @@ class TakeoverChecker:
                 capture_output=True,
                 text=True,
                 timeout=300,
-                check=True,
             )
 
             with open(output_file, 'w') as f:
@@ -2136,12 +2135,15 @@ class TakeoverChecker:
 
             findings = []
             if json_file.exists():
-                with open(json_file, 'r') as f:
-                    data = json.load(f)
-                if isinstance(data, list):
-                    findings = data
-                elif isinstance(data, dict):
-                    findings = [data]
+                try:
+                    with open(json_file, 'r') as f:
+                        data = json.load(f)
+                    if isinstance(data, list):
+                        findings = data
+                    elif isinstance(data, dict):
+                        findings = [data]
+                except (json.JSONDecodeError, OSError):
+                    pass
 
             if findings:
                 Logger.warning("Possible takeovers found!")

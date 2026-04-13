@@ -476,6 +476,13 @@ class ResultsAnalyzer:
                 lines.append(f"- {finding}")
             lines.append("")
 
+        # Interesting parameters
+        if self.parameters:
+            lines.append("## Interesting Parameters\n")
+            for param in sorted(self.parameters):
+                lines.append(f"- {param}")
+            lines.append("")
+
         # Save
         with open(output_file, 'w') as f:
             f.write('\n'.join(lines))

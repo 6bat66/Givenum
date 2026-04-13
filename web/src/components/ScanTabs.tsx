@@ -266,8 +266,8 @@ function HostsTab({ data }: { data: ScanData }) {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((host, i) => (
-                <tr key={i} className="border-t transition-colors hover:bg-zinc-800/30" style={{ borderColor: 'var(--border-subtle)' }}>
+              {filtered.map((host) => (
+                <tr key={host.url} className="border-t transition-colors hover:bg-zinc-800/30" style={{ borderColor: 'var(--border-subtle)' }}>
                   <td className="px-4 py-2.5">
                     <a href={host.url} target="_blank" rel="noopener"
                       className="font-mono text-xs truncate block max-w-xs hover:underline"
@@ -324,6 +324,7 @@ function UrlsTab({ data }: { data: ScanData }) {
             <span className="font-semibold" style={{ color: 'var(--yellow)' }}>{data.paramUrls.length}</span> with params
           </span>
           <button
+            type="button"
             onClick={() => setShowParamsOnly((v) => !v)}
             className="px-2 py-1 rounded text-xs transition-colors"
             style={showParamsOnly
@@ -337,8 +338,8 @@ function UrlsTab({ data }: { data: ScanData }) {
 
       <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
         <div className="overflow-y-auto" style={{ maxHeight: '60vh' }}>
-          {shown.map((url, i) => (
-            <div key={i} className="flex items-center px-4 py-1.5 border-b text-xs font-mono transition-colors hover:bg-zinc-800/30"
+          {shown.map((url) => (
+            <div key={url} className="flex items-center px-4 py-1.5 border-b text-xs font-mono transition-colors hover:bg-zinc-800/30"
               style={{ borderColor: 'var(--border-subtle)' }}>
               <a href={url} target="_blank" rel="noopener"
                 className="truncate hover:underline" style={{ color: url.includes('?') ? 'var(--yellow)' : 'var(--text-muted)' }}>
@@ -380,7 +381,7 @@ function VulnsTab({ data }: { data: ScanData }) {
             </div>
             <div className="overflow-y-auto" style={{ maxHeight: '40vh' }}>
               {data.nuclei[sev].map((item, i) => (
-                <div key={i} className="px-4 py-2 border-b text-xs font-mono" style={{ borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }}>
+                <div key={`${sev}-${i}`} className="px-4 py-2 border-b text-xs font-mono" style={{ borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }}>
                   {item}
                 </div>
               ))}
@@ -397,7 +398,7 @@ function VulnsTab({ data }: { data: ScanData }) {
           </div>
           <div className="overflow-y-auto" style={{ maxHeight: '40vh' }}>
             {data.dalfox.map((item, i) => (
-              <div key={i} className="px-4 py-2 border-b text-xs font-mono" style={{ borderColor: '#7f1d1d', color: '#fca5a5' }}>
+              <div key={`dalfox-${i}`} className="px-4 py-2 border-b text-xs font-mono" style={{ borderColor: '#7f1d1d', color: '#fca5a5' }}>
                 {item}
               </div>
             ))}

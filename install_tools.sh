@@ -30,6 +30,7 @@ header()  {
 # DETECT ENVIRONMENT
 # ============================================================================
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')   # darwin | linux
 ARCH=$(uname -m)                               # x86_64 | arm64 | aarch64
 
@@ -500,8 +501,11 @@ header "PYTHON DEPENDENCIES"
 
 info "Installing GivEnum Python requirements..."
 
-REQS=$(mktemp)
-cat > "$REQS" << 'EOF'
+REQS="${SCRIPT_DIR:-$(pwd)}/requirements.txt"
+if [ ! -f "$REQS" ]; then
+    warning "requirements.txt not found, using built-in fallback"
+    REQS_TMP=$(mktemp)
+    cat > "$REQS_TMP" << 'EOF'
 requests>=2.31.0
 beautifulsoup4>=4.12.0
 lxml>=4.9.0
@@ -509,6 +513,8 @@ urllib3>=2.0.0
 dnspython>=2.4.0
 flask>=3.0.0
 EOF
+    REQS="$REQS_TMP"
+fi
 
 if in_venv; then
     python3 -m pip install -q -r "$REQS" && success "Python dependencies installed"
@@ -517,7 +523,7 @@ else
         || python3 -m pip install -q --break-system-packages -r "$REQS" 2>/dev/null \
         || warning "Some Python packages may have failed"
 fi
-rm -f "$REQS"
+[ -n "${REQS_TMP:-}" ] && rm -f "$REQS_TMP"
 
 # ============================================================================
 # FINAL VERIFICATION

@@ -143,7 +143,7 @@ export function resolveScanDir(scanId: string): string | null {
   const scanDir = path.resolve(baseDir, decoded)
   const expectedBase = path.resolve(baseDir) + path.sep
 
-  if (scanDir !== path.resolve(baseDir) && !scanDir.startsWith(expectedBase)) {
+  if (!scanDir.startsWith(expectedBase)) {
     return null
   }
 
@@ -303,7 +303,7 @@ export function getScan(scanId: string): ScanData | null {
     analysisAvailable: fs.existsSync(path.join(scanDir, 'reports', 'analysis.md')),
     stats: {
       subdomains: subdomains.length,
-      alive: hosts.length,
+      alive: readLines(path.join(scanDir, 'http', 'alive.txt')).length,
       urls: allUrls.length,
       vulns: nucleiRaw.length,
       ports: readLines(path.join(scanDir, 'ports', 'open_ports.txt')).length,
