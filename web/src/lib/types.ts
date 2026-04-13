@@ -45,6 +45,13 @@ export interface DiffData {
   removed: string[]
 }
 
+export interface ToolLogEntry {
+  status: 'ok' | 'fail' | 'timeout' | 'not_found' | 'error'
+  rc: number
+  elapsed: number
+  msg?: string
+}
+
 export interface ScanData extends ScanMeta {
   analysisAvailable?: boolean
   subdomains: string[]
@@ -70,6 +77,7 @@ export interface ScanData extends ScanMeta {
     previousScan: string | null
     files: Record<string, DiffData>
   }
+  toolLogs: Record<string, ToolLogEntry>
 }
 
 export interface ScanJob {

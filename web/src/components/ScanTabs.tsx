@@ -503,6 +503,152 @@ function ScreenshotsTab({ data }: { data: ScanData }) {
   )
 }
 
+// ── Tab: Tools ────────────────────────────────────────────────
+
+function ToolsTab({ data }: { data: ScanData }) {
+  const [selectedTool, setSelectedTool] = useState<string | null>(null)
+  const [logContent, setLogContent] = useState<string | null>(null)
+  const [logLoading, setLogLoading] = useState(false)
+
+  const entries = Object.entries(data.toolLogs).sort((a, b) => a[0].localeCompare(b[0]))
+
+  if (entries.length === 0) {
+    return <EmptyState icon="🔧" text="No tool log data" hint="execution_summary.json is written at scan end — older scans won't have this" />
+  }
+
+  const ok = entries.filter(([, v]) => v.status === 'ok').length
+  const fail = entries.filter(([, v]) => v.status === 'fail').length
+  const missing = entries.filter(([, v]) => v.status === 'not_found').length
+  const other = entries.length - ok - fail - missing
+
+  async function openLog(tool: string) {
+    setSelectedTool(tool)
+    setLogContent(null)
+    setLogLoading(true)
+    try {
+      const res = await fetch(`/api/scan/${data.id}/logs/${tool}`)
+      const text = await res.text()
+      setLogContent(text || '(empty — tool produced no stderr)')
+    } catch {
+      setLogContent('(failed to load log)')
+    } finally {
+      setLogLoading(false)
+    }
+  }
+
+  function statusColor(status: string): string {
+    if (status === 'ok') return '#4ade80'
+    if (status === 'fail') return '#f87171'
+    if (status === 'timeout') return '#fb923c'
+    if (status === 'not_found') return 'var(--text-subtle)'
+    return '#facc15'
+  }
+
+  function statusIcon(status: string): string {
+    if (status === 'ok') return '✓'
+    if (status === 'fail') return '✗'
+    if (status === 'timeout') return '⏱'
+    if (status === 'not_found') return '—'
+    return '!'
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Stats bar */}
+      <div className="flex flex-wrap gap-3 text-sm">
+        <span style={{ color: '#4ade80' }}><span className="font-mono font-bold">{ok}</span> ok</span>
+        {fail > 0 && <span style={{ color: '#f87171' }}><span className="font-mono font-bold">{fail}</span> failed</span>}
+        {other > 0 && <span style={{ color: '#fb923c' }}><span className="font-mono font-bold">{other}</span> timeout/error</span>}
+        {missing > 0 && <span style={{ color: 'var(--text-subtle)' }}><span className="font-mono font-bold">{missing}</span> not installed</span>}
+      </div>
+
+      {/* Tool table */}
+      <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+        <div className="overflow-auto" style={{ maxHeight: '60vh' }}>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs" style={{ color: 'var(--text-muted)', background: 'var(--surface)' }}>
+                <th className="px-4 py-3 font-medium sticky top-0" style={{ background: 'var(--surface)' }}>Tool</th>
+                <th className="px-4 py-3 font-medium sticky top-0" style={{ background: 'var(--surface)' }}>Status</th>
+                <th className="px-4 py-3 font-medium sticky top-0" style={{ background: 'var(--surface)' }}>Exit code</th>
+                <th className="px-4 py-3 font-medium sticky top-0" style={{ background: 'var(--surface)' }}>Elapsed</th>
+                <th className="px-4 py-3 font-medium sticky top-0" style={{ background: 'var(--surface)' }}>Log</th>
+              </tr>
+            </thead>
+            <tbody>
+              {entries.map(([tool, info]) => (
+                <tr
+                  key={tool}
+                  className="border-t transition-colors hover:bg-zinc-800/30 cursor-pointer"
+                  style={{ borderColor: 'var(--border-subtle)' }}
+                  onClick={() => openLog(tool)}
+                >
+                  <td className="px-4 py-2.5 font-mono text-xs" style={{ color: 'var(--text)' }}>{tool}</td>
+                  <td className="px-4 py-2.5">
+                    <span className="font-mono text-xs font-semibold" style={{ color: statusColor(info.status) }}>
+                      {statusIcon(info.status)} {info.status}
+                    </span>
+                    {info.msg && (
+                      <span className="text-xs ml-2" style={{ color: 'var(--text-subtle)' }}>{info.msg}</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2.5 font-mono text-xs" style={{ color: info.rc === 0 ? 'var(--text-muted)' : '#f87171' }}>
+                    {info.rc === -1 ? '—' : info.rc}
+                  </td>
+                  <td className="px-4 py-2.5 font-mono text-xs" style={{ color: 'var(--text-muted)' }}>{info.elapsed}s</td>
+                  <td className="px-4 py-2.5">
+                    <span className="text-xs px-2 py-0.5 rounded" style={{ background: 'var(--surface-2)', color: 'var(--cyan)', border: '1px solid var(--border)', cursor: 'pointer' }}>
+                      ver
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Log modal */}
+      {selectedTool && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.75)' }}
+          onClick={() => setSelectedTool(null)}
+        >
+          <div
+            className="rounded-xl flex flex-col w-full max-w-3xl"
+            style={{ background: 'var(--surface)', border: '1px solid var(--border)', maxHeight: '80vh' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-3 border-b" style={{ borderColor: 'var(--border)' }}>
+              <div>
+                <span className="font-mono font-semibold text-sm" style={{ color: 'var(--cyan)' }}>{selectedTool}</span>
+                <span className="text-xs ml-3" style={{ color: 'var(--text-muted)' }}>stderr</span>
+              </div>
+              <button
+                onClick={() => setSelectedTool(null)}
+                className="text-sm px-3 py-1 rounded"
+                style={{ background: 'var(--surface-2)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}
+              >
+                Fechar
+              </button>
+            </div>
+            <div className="overflow-auto p-4 flex-1" style={{ fontFamily: 'monospace' }}>
+              {logLoading ? (
+                <div className="text-sm" style={{ color: 'var(--text-subtle)' }}>Carregando...</div>
+              ) : (
+                <pre className="text-xs whitespace-pre-wrap break-all" style={{ color: 'var(--text-muted)', lineHeight: 1.6 }}>
+                  {logContent}
+                </pre>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Main tabs component ───────────────────────────────────────
 
 const TABS = [
@@ -513,6 +659,7 @@ const TABS = [
   { id: 'vulns', label: 'Vulnerabilities' },
   { id: 'diff', label: 'Diff' },
   { id: 'screenshots', label: 'Screenshots' },
+  { id: 'tools', label: 'Tools' },
 ] as const
 
 type TabId = typeof TABS[number]['id']
@@ -520,12 +667,14 @@ type TabId = typeof TABS[number]['id']
 export default function ScanTabs({ data }: { data: ScanData }) {
   const [active, setActive] = useState<TabId>('summary')
 
+  const toolFails = Object.values(data.toolLogs).filter((v) => v.status !== 'ok' && v.status !== 'not_found').length
   const badges: Partial<Record<TabId, { value: number; color: string }>> = {
     subdomains: { value: data.subdomains.length + data.bruteforce.length, color: 'var(--cyan)' },
     hosts: { value: data.hosts.length, color: 'var(--green)' },
     urls: { value: data.urls.length, color: 'var(--purple)' },
     vulns: { value: Object.values(data.nuclei).flat().length + data.dalfox.length, color: 'var(--red)' },
     screenshots: { value: data.screenshots.length, color: 'var(--text-muted)' },
+    tools: { value: toolFails, color: '#f87171' },
   }
 
   return (
@@ -562,6 +711,7 @@ export default function ScanTabs({ data }: { data: ScanData }) {
         {active === 'vulns'       && <VulnsTab data={data} />}
         {active === 'diff'        && <DiffTab data={data} />}
         {active === 'screenshots' && <ScreenshotsTab data={data} />}
+        {active === 'tools'       && <ToolsTab data={data} />}
       </div>
     </div>
   )

@@ -332,5 +332,8 @@ export function getScan(scanId: string): ScanData | null {
       previousScan: diffSummary?.previous_scan ?? null,
       files: diffFiles,
     },
+    toolLogs: (readJson<Record<string, { status: string; rc: number; elapsed: number; msg?: string }>>(
+      path.join(scanDir, 'logs', 'execution_summary.json')
+    ) ?? {}) as ScanData['toolLogs'],
   }
 }

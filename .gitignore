@@ -33,6 +33,8 @@ web/.env*.local
 # Logs
 *.log
 logs/
+# But keep the Next.js API route that happens to be named "logs"
+!web/src/**/logs/
 
 # Archives
 *.tar.gz
