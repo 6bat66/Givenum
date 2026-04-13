@@ -66,7 +66,8 @@ class APIConfig:
     """API Keys Configuration"""
     
     def __init__(self):
-        self.config_file = Path.home() / '.config' / 'givenum' / 'api_keys.json'
+        config_dir = Path(os.environ.get('GIVENUM_CONFIG_DIR', Path.home() / '.config' / 'givenum'))
+        self.config_file = config_dir / 'api_keys.json'
         self.keys = self.load_keys()
     
     def load_keys(self) -> Dict[str, str]:
@@ -146,6 +147,66 @@ def count_nonempty_lines(file_path: Path) -> int:
 
     with open(file_path, 'r') as f:
         return sum(1 for line in f if line.strip())
+
+
+# Module-level tool execution log — reset at scan start via reset_tool_log()
+_tool_log: Dict[str, dict] = {}
+
+
+def reset_tool_log():
+    """Clear the tool log for a new scan."""
+    global _tool_log
+    _tool_log = {}
+
+
+def run_logged(name: str, cmd: list, log_dir: Path, **kwargs) -> subprocess.CompletedProcess:
+    """subprocess.run wrapper that saves stderr to logs/<name>.log and tracks status.
+
+    Handles both stderr=subprocess.DEVNULL (removed) and capture_output=True
+    (converted to stdout=PIPE so callers can still read result.stdout).
+    """
+    log_file = log_dir / f"{name}.log"
+    t0 = time.time()
+    # capture_output=True sets both stdout and stderr to PIPE — split them
+    if kwargs.pop('capture_output', False):
+        kwargs['stdout'] = subprocess.PIPE
+        kwargs.setdefault('text', True)
+    # Always redirect stderr to the log file (remove any previous setting)
+    kwargs.pop('stderr', None)
+    try:
+        with open(log_file, 'w') as lf:
+            result = subprocess.run(cmd, stderr=lf, **kwargs)
+        elapsed = round(time.time() - t0, 1)
+        _tool_log[name] = {
+            'status': 'ok' if result.returncode == 0 else 'fail',
+            'rc': result.returncode,
+            'elapsed': elapsed,
+        }
+        return result
+    except subprocess.TimeoutExpired:
+        _tool_log[name] = {'status': 'timeout', 'rc': -1, 'elapsed': round(time.time() - t0, 1)}
+        raise
+    except subprocess.CalledProcessError as e:
+        _tool_log[name] = {'status': 'fail', 'rc': e.returncode, 'elapsed': round(time.time() - t0, 1)}
+        raise
+    except FileNotFoundError:
+        _tool_log[name] = {'status': 'not_found', 'rc': -1, 'elapsed': 0}
+        raise
+    except Exception as e:
+        _tool_log[name] = {'status': 'error', 'rc': -1, 'elapsed': round(time.time() - t0, 1), 'msg': str(e)}
+        raise
+
+
+def _track_captured(name: str, result: subprocess.CompletedProcess, t0: float, log_dir: Path):
+    """Record status and save stderr for a capture_output=True subprocess call."""
+    elapsed = round(time.time() - t0, 1)
+    _tool_log[name] = {
+        'status': 'ok' if result.returncode == 0 else 'fail',
+        'rc': result.returncode,
+        'elapsed': elapsed,
+    }
+    if result.stderr:
+        (log_dir / f"{name}.log").write_text(result.stderr)
 
 
 class OutputManager:
@@ -393,12 +454,14 @@ class SubdomainEnum:
         output_file = self.output_mgr.get_path('subdomains', f'{tool_name}.txt')
 
         try:
+            _t0 = time.time()
             result = subprocess.run(
                 command,
                 capture_output=True,
                 text=True,
                 timeout=600
             )
+            _track_captured(tool_name, result, _t0, self.output_mgr.dirs['logs'])
 
             subs = set(line.strip() for line in result.stdout.split('\n') if line.strip())
 
@@ -409,6 +472,7 @@ class SubdomainEnum:
             return subs
 
         except subprocess.TimeoutExpired:
+            _tool_log[tool_name] = {'status': 'timeout', 'rc': -1, 'elapsed': 600}
             Logger.warning(f"{tool_name} timeout")
         except Exception as e:
             Logger.error(f"Error running {tool_name}: {e}")
@@ -476,10 +540,10 @@ class SubdomainEnum:
         output_file = self.output_mgr.get_path('subdomains', 'bruteforce.txt')
 
         try:
-            subprocess.run(
-                ['puredns', 'bruteforce', str(wordlist), self.domain, '-w', str(output_file)],
-                timeout=1800,
-            )
+            run_logged('puredns_bruteforce',
+                       ['puredns', 'bruteforce', str(wordlist), self.domain, '-w', str(output_file)],
+                       self.output_mgr.dirs['logs'], timeout=1800,
+                       stdout=subprocess.DEVNULL)
 
             subs = set()
             if output_file.exists():
@@ -519,11 +583,10 @@ class DNSResolver:
         output_file = self.output_mgr.get_path('dns', 'resolved.txt')
 
         try:
-            subprocess.run(
-                ['puredns', 'resolve', str(input_file), '-w', str(output_file)],
-                timeout=600,
-                check=True
-            )
+            run_logged('puredns_resolve',
+                       ['puredns', 'resolve', str(input_file), '-w', str(output_file)],
+                       self.output_mgr.dirs['logs'], timeout=600, check=True,
+                       stdout=subprocess.DEVNULL)
 
             count = count_nonempty_lines(output_file)
 
@@ -549,12 +612,9 @@ class DNSResolver:
 
         try:
             with open(output_file, 'w') as out_f:
-                subprocess.run(
-                    ['dnsx', '-l', str(input_file), '-a', '-silent'],
-                    stdout=out_f,
-                    stderr=subprocess.DEVNULL,
-                    timeout=600,
-                )
+                run_logged('dnsx_fallback',
+                           ['dnsx', '-l', str(input_file), '-a', '-silent'],
+                           self.output_mgr.dirs['logs'], stdout=out_f, timeout=600)
             count = count_nonempty_lines(output_file)
             if count > 0:
                 Logger.success(f"dnsx fallback: {count} resolved")
@@ -578,22 +638,14 @@ class DNSResolver:
         # A records
         a_records = self.output_mgr.get_path('dns', 'a_records.txt')
         with open(a_records, 'w') as out_f:
-            subprocess.run(
-                ['dnsx', '-l', str(input_file), '-a', '-resp-only', '-silent'],
-                stdout=out_f,
-                stderr=subprocess.DEVNULL,
-                timeout=300,
-            )
+            run_logged('dnsx_a', ['dnsx', '-l', str(input_file), '-a', '-resp-only', '-silent'],
+                       self.output_mgr.dirs['logs'], stdout=out_f, timeout=300)
 
         # CNAME records
         cname_records = self.output_mgr.get_path('dns', 'cname_records.txt')
         with open(cname_records, 'w') as out_f:
-            subprocess.run(
-                ['dnsx', '-l', str(input_file), '-cname', '-resp-only', '-silent'],
-                stdout=out_f,
-                stderr=subprocess.DEVNULL,
-                timeout=300,
-            )
+            run_logged('dnsx_cname', ['dnsx', '-l', str(input_file), '-cname', '-resp-only', '-silent'],
+                       self.output_mgr.dirs['logs'], stdout=out_f, timeout=300)
 
         Logger.success("DNS enrichment complete")
 
@@ -637,7 +689,7 @@ class PortScanner:
             
             # Run sdlookup
             cmd = ['sdlookup', '-i', str(ip_file), '-json', '-o', str(output_file)]
-            subprocess.run(cmd, timeout=300, check=True)
+            run_logged('sdlookup', cmd, self.output_mgr.dirs['logs'], timeout=300, check=True)
             
             # Parse results (sdlookup outputs JSONL, one JSON object per line)
             if output_file.exists():
@@ -698,7 +750,8 @@ class HTTPProber:
                 '-o', str(json_file)
             ]
 
-            subprocess.run(cmd, timeout=600, check=True)
+            run_logged('httpx', cmd, self.output_mgr.dirs['logs'], timeout=600, check=True,
+                       stdout=subprocess.DEVNULL)
 
             # Extract URLs
             urls = []
@@ -731,6 +784,7 @@ class HTTPProber:
         output_file = self.output_mgr.get_path('http', 'url_status.txt')
         
         try:
+            _t0 = time.time()
             with open(input_file, 'r') as f:
                 result = subprocess.run(
                     ['hakcheckurl'],
@@ -739,12 +793,13 @@ class HTTPProber:
                     text=True,
                     timeout=300
                 )
-            
+            _track_captured('hakcheckurl', result, _t0, self.output_mgr.dirs['logs'])
+
             with open(output_file, 'w') as f:
                 f.write(result.stdout)
-            
+
             Logger.success("URL status check complete")
-            
+
         except Exception as e:
             Logger.error(f"Error in hakcheckurl: {e}")
 
@@ -769,7 +824,7 @@ class HTTPProber:
                 '--write-db-uri', f'sqlite://{db_file}'
             ]
 
-            subprocess.run(cmd, timeout=1800, check=True)
+            run_logged('gowitness', cmd, self.output_mgr.dirs['logs'], timeout=1800, check=True)
             Logger.success(f"Screenshots saved to {screenshots_dir}")
 
         except Exception as e:
@@ -813,6 +868,7 @@ class URLCollector:
                 })
             
             all_urls = set()
+            _t0 = time.time()
             for domain in domains[:50]:  # Limit to prevent excessive API calls
                 result = subprocess.run(
                     ['xurlfind3r', '-d', domain, '--silent'],
@@ -822,10 +878,11 @@ class URLCollector:
                 )
                 urls = set(line.strip() for line in result.stdout.split('\n') if line.strip())
                 all_urls.update(urls)
-            
+            _track_captured('xurlfind3r', result if domains else type('R', (), {'returncode': 0, 'stderr': ''})(), _t0, self.output_mgr.dirs['logs'])
+
             with open(output_file, 'w') as f:
                 f.write('\n'.join(sorted(all_urls)) + '\n')
-            
+
             Logger.success(f"xurlfind3r: {len(all_urls)} URLs")
             return all_urls
             
@@ -858,6 +915,7 @@ class URLCollector:
                         if self._extract_host(line)
                     })
 
+                _t0 = time.time()
                 result = subprocess.run(
                     ['gau', '--subs'],
                     input='\n'.join(domains[:30]),
@@ -865,6 +923,7 @@ class URLCollector:
                     text=True,
                     timeout=600
                 )
+                _track_captured('gau', result, _t0, self.output_mgr.dirs['logs'])
 
                 urls = set(line.strip() for line in result.stdout.split('\n') if line.strip())
                 all_urls.update(urls)
@@ -890,6 +949,7 @@ class URLCollector:
                         if self._extract_host(line.strip())
                     )
 
+                _t0 = time.time()
                 result = subprocess.run(
                     ['waybackurls'],
                     input=domain_names,
@@ -897,6 +957,7 @@ class URLCollector:
                     text=True,
                     timeout=600
                 )
+                _track_captured('waybackurls', result, _t0, self.output_mgr.dirs['logs'])
 
                 urls = set(line.strip() for line in result.stdout.split('\n') if line.strip())
                 all_urls.update(urls)
@@ -921,6 +982,7 @@ class URLCollector:
         output_file = self.output_mgr.get_path('urls', 'hakrawler.txt')
 
         try:
+            _t0 = time.time()
             with open(input_file, 'r') as f:
                 result = subprocess.run(
                     ['hakrawler', '-d', '2', '-u', '-timeout', '10'],
@@ -929,6 +991,7 @@ class URLCollector:
                     text=True,
                     timeout=600
                 )
+            _track_captured('hakrawler', result, _t0, self.output_mgr.dirs['logs'])
 
             urls = set(line.strip() for line in result.stdout.split('\n') if line.strip())
 
@@ -966,11 +1029,8 @@ class URLCollector:
             f.write('\n'.join(interesting_paths) + '\n')
 
         try:
-            subprocess.run(
-                ['meg', '-d', '1000', '-v', str(paths_file), str(input_file), str(meg_dir)],
-                timeout=600,
-                stderr=subprocess.DEVNULL
-            )
+            run_logged('meg', ['meg', '-d', '1000', '-v', str(paths_file), str(input_file), str(meg_dir)],
+                       self.output_mgr.dirs['logs'], timeout=600)
 
             # Collect 200 responses
             found = set()
@@ -1020,6 +1080,7 @@ class URLCollector:
             return
 
         try:
+            _t0 = time.time()
             with open(input_file, 'r') as f:
                 result = subprocess.run(
                     ['freq', str(corpus)],
@@ -1028,6 +1089,7 @@ class URLCollector:
                     text=True,
                     timeout=120
                 )
+            _track_captured('freq', result, _t0, self.output_mgr.dirs['logs'])
 
             with open(output_file, 'w') as f:
                 f.write(result.stdout)
@@ -1061,8 +1123,8 @@ class URLCollector:
                 '-o', str(output_dir)
             ])
             
-            subprocess.run(cmd, timeout=300, stderr=subprocess.DEVNULL)
-            
+            run_logged('photon', cmd, self.output_mgr.dirs['logs'], timeout=300)
+
             # Collect results
             urls = set()
             url_file = output_dir / urlparse(url).netloc / 'urls.txt'
@@ -1096,6 +1158,7 @@ class URLCollector:
         clean_file = self.output_mgr.get_path('urls', 'urls_clean.txt')
 
         try:
+            _t0 = time.time()
             with open(raw_file, 'r') as f:
                 result = subprocess.run(
                     ['uro'],
@@ -1104,6 +1167,7 @@ class URLCollector:
                     text=True,
                     timeout=300
                 )
+            _track_captured('uro', result, _t0, self.output_mgr.dirs['logs'])
 
             with open(clean_file, 'w') as f:
                 f.write(result.stdout)
@@ -1130,6 +1194,7 @@ class JSAnalyzer:
         output_file = self.output_mgr.get_path('js', 'subjs.txt')
         
         try:
+            _t0 = time.time()
             with open(input_file, 'r') as f:
                 result = subprocess.run(
                     ['subjs'],
@@ -1138,12 +1203,13 @@ class JSAnalyzer:
                     text=True,
                     timeout=300
                 )
-            
+            _track_captured('subjs', result, _t0, self.output_mgr.dirs['logs'])
+
             js_urls = set(line.strip() for line in result.stdout.split('\n') if line.strip())
-            
+
             with open(output_file, 'w') as f:
                 f.write('\n'.join(sorted(js_urls)) + '\n')
-            
+
             Logger.success(f"subjs: {len(js_urls)} JS files")
             return js_urls
             
@@ -1164,7 +1230,7 @@ class JSAnalyzer:
                 urls = [line.strip() for line in f if line.strip()]
             
             all_findings = set()
-            
+            _t0 = time.time()
             for url in urls[:100]:  # Limit to prevent excessive scanning
                 result = subprocess.run(
                     ['jsubfinder', '-u', url, '-silent'],
@@ -1174,10 +1240,12 @@ class JSAnalyzer:
                 )
                 findings = set(line.strip() for line in result.stdout.split('\n') if line.strip())
                 all_findings.update(findings)
-            
+            if urls:
+                _track_captured('jsubfinder', result, _t0, self.output_mgr.dirs['logs'])
+
             with open(output_file, 'w') as f:
                 f.write('\n'.join(sorted(all_findings)) + '\n')
-            
+
             Logger.success(f"jsubfinder: {len(all_findings)} findings")
             return all_findings
             
@@ -1202,6 +1270,7 @@ class JSAnalyzer:
                 with open(alive_file, 'r') as f:
                     urls = f.read()
                 
+                _t0 = time.time()
                 result = subprocess.run(
                     ['getJS', '--input', '-', '--complete'],
                     input=urls,
@@ -1209,13 +1278,14 @@ class JSAnalyzer:
                     text=True,
                     timeout=600
                 )
-                
+                _track_captured('getJS', result, _t0, self.output_mgr.dirs['logs'])
+
                 js_urls = set(line.strip() for line in result.stdout.split('\n') if line.strip())
                 all_js.update(js_urls)
-                
+
                 with open(getjs_file, 'w') as f:
                     f.write('\n'.join(sorted(js_urls)) + '\n')
-                
+
                 Logger.success(f"getJS: {len(js_urls)} JS files")
                 
             except Exception as e:
@@ -1287,7 +1357,7 @@ class GitDumper:
         
         try:
             cmd = ['goop', url, str(output_dir)]
-            subprocess.run(cmd, timeout=300)
+            run_logged('goop', cmd, self.output_mgr.dirs['logs'], timeout=300)
             Logger.success(f"Repository dumped to {output_dir}")
         except Exception as e:
             Logger.error(f"Error dumping with goop: {e}")
@@ -1302,7 +1372,7 @@ class GitDumper:
         try:
             git_url = f"{url}/.git/"
             cmd = ['git-dumper', git_url, str(output_dir)]
-            subprocess.run(cmd, timeout=300)
+            run_logged('git_dumper', cmd, self.output_mgr.dirs['logs'], timeout=300)
             Logger.success(f"Repository dumped to {output_dir}")
         except Exception as e:
             Logger.error(f"Error dumping with git-dumper: {e}")
@@ -1329,8 +1399,9 @@ class VulnScanner:
         try:
             # Update templates
             Logger.info("Updating Nuclei templates...")
-            subprocess.run(['nuclei', '-update-templates'], timeout=300, stderr=subprocess.DEVNULL)
-            
+            run_logged('nuclei_update', ['nuclei', '-update-templates'],
+                       self.output_mgr.dirs['logs'], timeout=300)
+
             cmd = [
                 'nuclei',
                 '-l', str(input_file),
@@ -1338,8 +1409,8 @@ class VulnScanner:
                 '-silent',
                 '-jsonl-export', str(json_file)
             ]
-            
-            subprocess.run(cmd, timeout=3600, check=True)
+
+            run_logged('nuclei', cmd, self.output_mgr.dirs['logs'], timeout=3600, check=True)
             
             # Parse results
             vulns = []
@@ -1391,12 +1462,9 @@ class VulnScanner:
             with open(targets_file, 'w') as f:
                 f.write('\n'.join(targets) + '\n')
 
-            subprocess.run(
-                ['dalfox', 'file', str(targets_file),
-                 '--silence', '--no-color',
-                 '--output', str(output_file)],
-                timeout=1800,
-            )
+            run_logged('dalfox',
+                       ['dalfox', 'file', str(targets_file), '--silence', '--no-color', '--output', str(output_file)],
+                       self.output_mgr.dirs['logs'], timeout=1800)
 
             found = count_nonempty_lines(output_file) if output_file.exists() else 0
             if found > 0:
@@ -1488,7 +1556,7 @@ class ParameterDiscovery:
                 '--stable'
             ]
             
-            subprocess.run(cmd, timeout=1800)
+            run_logged('arjun', cmd, self.output_mgr.dirs['logs'], timeout=1800)
             Logger.success("Parameter discovery complete")
             
         except Exception as e:
@@ -1557,12 +1625,14 @@ class TakeoverChecker:
         json_file = self.output_mgr.get_path('takeover', 'subzy_results.json')
 
         try:
-            result = subprocess.run(
+            result = run_logged(
+                'subzy',
                 ['subzy', 'run', '--targets', str(input_file), '--output', str(json_file)],
+                self.output_mgr.dirs['logs'],
                 capture_output=True,
                 text=True,
                 timeout=300,
-                check=True
+                check=True,
             )
 
             with open(output_file, 'w') as f:
@@ -1594,18 +1664,23 @@ class TakeoverChecker:
         Logger.info("Checking takeovers with subjack...")
         output_file = self.output_mgr.get_path('takeover', 'subjack_results.txt')
 
+        log_dir = self.output_mgr.dirs['logs']
         try:
-            subprocess.run(
+            run_logged(
+                'subjack',
                 ['subjack', '-w', str(input_file), '-o', str(output_file),
                  '-ssl', '-timeout', '30', '-c',
                  str(Path.home() / 'go' / 'pkg' / 'mod' / 'github.com' / 'haccer' / 'subjack@v0.0.0-20201112041112-049c369c6946' / 'fingerprints.json')],
+                log_dir,
                 timeout=600,
             )
         except FileNotFoundError:
             # Try without fingerprints path (newer versions bundle it)
             try:
-                subprocess.run(
+                run_logged(
+                    'subjack',
                     ['subjack', '-w', str(input_file), '-o', str(output_file), '-ssl', '-timeout', '30'],
+                    log_dir,
                     timeout=600,
                 )
             except Exception as e:
@@ -1621,67 +1696,218 @@ class TakeoverChecker:
             Logger.success("subjack: no takeovers found")
 
 
+class NotificationManager:
+    """Send scan diff notifications to Discord and/or Telegram"""
+
+    def __init__(self, api_config: APIConfig, enabled: bool = True):
+        self.api_config = api_config
+        self.enabled = enabled
+
+    def _discord_color(self, summary: dict) -> int:
+        """Pick embed color based on severity of findings"""
+        if summary.get('new_vulns'):
+            return 0xFF4444   # red — new vulnerabilities
+        if any(v.get('new') for v in summary.get('changes', {}).values()):
+            return 0xFFA500   # orange — new items found
+        return 0x00CC66       # green — no changes
+
+    def send_discord(self, summary: dict):
+        webhook_url = self.api_config.get_key('discord_webhook')
+        if not webhook_url:
+            return
+
+        domain = summary.get('domain', 'unknown')
+        timestamp = summary.get('timestamp', '')
+        changes = summary.get('changes', {})
+
+        fields = []
+        for category, data in changes.items():
+            new_count = len(data.get('new', []))
+            removed_count = len(data.get('removed', []))
+            if new_count or removed_count:
+                value = f"+{new_count} new" if new_count else ""
+                if removed_count:
+                    value += f"  -{removed_count} removed" if value else f"-{removed_count} removed"
+                fields.append({"name": category.replace('_', ' ').title(), "value": value, "inline": True})
+
+        if not fields:
+            fields.append({"name": "Status", "value": "No changes detected", "inline": False})
+
+        embed = {
+            "title": f"GivEnum Scan — {domain}",
+            "description": f"Scan completed at {timestamp}",
+            "color": self._discord_color(summary),
+            "fields": fields,
+            "footer": {"text": "GivEnum | github.com/6bat66/Givenum"}
+        }
+
+        try:
+            import urllib.request
+            data = json.dumps({"embeds": [embed]}).encode('utf-8')
+            req = urllib.request.Request(
+                webhook_url,
+                data=data,
+                headers={'Content-Type': 'application/json'},
+                method='POST'
+            )
+            urllib.request.urlopen(req, timeout=10)
+            Logger.success("Discord notification sent")
+        except Exception as e:
+            Logger.warning(f"Discord notification failed: {e}")
+
+    def send_telegram(self, summary: dict):
+        token = self.api_config.get_key('telegram_token')
+        chat_id = self.api_config.get_key('telegram_chat_id')
+        if not token or not chat_id:
+            return
+
+        domain = summary.get('domain', 'unknown')
+        timestamp = summary.get('timestamp', '')
+        changes = summary.get('changes', {})
+
+        lines = [f"*GivEnum — {domain}*", f"_{timestamp}_", ""]
+
+        has_changes = False
+        for category, data in changes.items():
+            new_items = data.get('new', [])
+            removed_items = data.get('removed', [])
+            if new_items or removed_items:
+                has_changes = True
+                label = category.replace('_', ' ').title()
+                if new_items:
+                    lines.append(f"✅ `+{len(new_items)}` new {label}")
+                    for item in sorted(new_items)[:5]:
+                        lines.append(f"  • `{item}`")
+                    if len(new_items) > 5:
+                        lines.append(f"  _...and {len(new_items)-5} more_")
+                if removed_items:
+                    lines.append(f"🔴 `-{len(removed_items)}` removed {label}")
+
+        if not has_changes:
+            lines.append("No changes detected since last scan.")
+
+        new_vulns = summary.get('new_vulns', [])
+        if new_vulns:
+            lines.append("")
+            lines.append(f"🚨 *{len(new_vulns)} new vulnerability findings*")
+            for v in new_vulns[:3]:
+                lines.append(f"  • `{v}`")
+
+        text = '\n'.join(lines)
+
+        try:
+            import urllib.request, urllib.parse
+            url = f"https://api.telegram.org/bot{token}/sendMessage"
+            data = urllib.parse.urlencode({
+                'chat_id': chat_id,
+                'text': text,
+                'parse_mode': 'Markdown'
+            }).encode('utf-8')
+            req = urllib.request.Request(url, data=data, method='POST')
+            urllib.request.urlopen(req, timeout=10)
+            Logger.success("Telegram notification sent")
+        except Exception as e:
+            Logger.warning(f"Telegram notification failed: {e}")
+
+    def notify(self, summary: dict):
+        if not self.enabled:
+            return
+        self.send_discord(summary)
+        self.send_telegram(summary)
+
+
 class DiffManager:
     """Track changes between scans"""
-    
-    def __init__(self, output_mgr: OutputManager, domain: str):
+
+    COMPARE_FILES = [
+        ('subdomains', 'all_subdomains.txt'),
+        ('http',       'alive.txt'),
+        ('urls',       'urls_clean.txt'),
+        ('ports',      'open_ports.txt'),
+        ('vulnerabilities', 'nuclei_results.txt'),
+        ('takeover',   'subzy_results.txt'),
+    ]
+
+    def __init__(self, output_mgr: OutputManager, domain: str,
+                 notifier: 'NotificationManager' = None):
         self.output_mgr = output_mgr
         self.domain = domain
-        self.results_base = Path('./results')
-    
+        self.results_base = self.output_mgr.base_dir.parent.resolve()
+        self.notifier = notifier
+
     def find_previous_scan(self) -> Optional[Path]:
         """Find most recent previous scan"""
+        if not self.results_base.exists():
+            return None
         domain_scans = sorted([
             d for d in self.results_base.iterdir()
             if d.is_dir() and d.name.startswith(f"{self.domain}_") and d != self.output_mgr.base_dir
         ], reverse=True)
-        
         return domain_scans[0] if domain_scans else None
-    
+
     def diff_results(self):
-        """Compare with previous scan"""
+        """Compare with previous scan, save diffs, and send notifications"""
         Logger.header("DIFF ANALYSIS")
-        
+
         previous = self.find_previous_scan()
         if not previous:
-            Logger.info("No previous scan found")
+            Logger.info("No previous scan found — diff skipped")
             return
-        
+
         Logger.info(f"Comparing with: {previous.name}")
-        
-        compare_files = [
-            ('subdomains', 'all_subdomains.txt'),
-            ('http', 'alive.txt'),
-            ('urls', 'urls_clean.txt')
-        ]
-        
-        for category, filename in compare_files:
+
+        summary = {
+            'domain': self.domain,
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'previous_scan': previous.name,
+            'changes': {},
+            'new_vulns': [],
+        }
+
+        for category, filename in self.COMPARE_FILES:
             current_file = self.output_mgr.get_path(category, filename)
             previous_file = previous / category / filename
-            
+
             if not current_file.exists() or not previous_file.exists():
                 continue
-            
+
             with open(current_file, 'r') as f:
                 current_lines = set(line.strip() for line in f if line.strip())
-            
             with open(previous_file, 'r') as f:
                 previous_lines = set(line.strip() for line in f if line.strip())
-            
-            new_items = current_lines - previous_lines
-            removed_items = previous_lines - current_lines
-            
+
+            new_items = sorted(current_lines - previous_lines)
+            removed_items = sorted(previous_lines - current_lines)
+
             if new_items or removed_items:
                 diff_file = self.output_mgr.get_path('diff', f'{filename}.diff')
                 with open(diff_file, 'w') as f:
                     if new_items:
                         f.write("# NEW ITEMS\n")
-                        f.write('\n'.join(sorted(new_items)) + '\n\n')
+                        f.write('\n'.join(new_items) + '\n\n')
                     if removed_items:
                         f.write("# REMOVED ITEMS\n")
-                        f.write('\n'.join(sorted(removed_items)) + '\n')
-                
+                        f.write('\n'.join(removed_items) + '\n')
+
                 Logger.info(f"{filename}: +{len(new_items)} new, -{len(removed_items)} removed")
+
+                key = f"{category}/{filename}"
+                summary['changes'][key] = {'new': new_items, 'removed': removed_items}
+
+                if category == 'vulnerabilities':
+                    summary['new_vulns'] = new_items
+
+        # Save structured summary
+        summary_file = self.output_mgr.get_path('diff', 'diff_summary.json')
+        with open(summary_file, 'w') as f:
+            json.dump(summary, f, indent=2)
+
+        if not summary['changes']:
+            Logger.success("No changes since last scan")
+
+        # Send notifications
+        if self.notifier:
+            self.notifier.notify(summary)
 
 
 class ReportGenerator:
@@ -1690,8 +1916,17 @@ class ReportGenerator:
     def __init__(self, output_mgr: OutputManager, domain: str):
         self.output_mgr = output_mgr
         self.domain = domain
+
+    def _read_lines(self, category: str, filename: str) -> List[str]:
+        """Read non-empty lines from an output file."""
+        file_path = self.output_mgr.get_path(category, filename)
+        if not file_path.exists():
+            return []
+
+        with open(file_path, 'r') as f:
+            return [line.strip() for line in f if line.strip()]
     
-    def generate_markdown_report(self):
+    def generate_markdown_report(self, scan_mode: str = 'passive'):
         """Generate markdown report"""
         Logger.info("Generating markdown report...")
         
@@ -1700,6 +1935,7 @@ class ReportGenerator:
         lines = [
             f"# Enumeration Report: {self.domain}",
             f"\n**Date**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            f"\n**Mode**: `{scan_mode}`",
             f"\n**Scan Directory**: `{self.output_mgr.base_dir}`",
             "\n---\n",
             "## Summary\n"
@@ -1752,27 +1988,57 @@ class ReportGenerator:
         
         Logger.success(f"Report: {report_file}")
     
-    def generate_json_report(self):
+    def generate_json_report(self, scan_mode: str = 'passive'):
         """Generate JSON report"""
+        statistics = {
+            'subdomains': len(self._read_lines('subdomains', 'all_subdomains.txt')),
+            'bruteforce_subdomains': len(self._read_lines('subdomains', 'bruteforce.txt')),
+            'resolved': len(self._read_lines('dns', 'resolved.txt')),
+            'active_http': len(self._read_lines('http', 'alive.txt')),
+            'urls': len(self._read_lines('urls', 'urls_clean.txt')),
+            'js_files': len(self._read_lines('js', 'all_js_files.txt')),
+            'interesting_parameters': len(self._read_lines('parameters', 'interesting_parameters.txt')),
+            'open_ports': len(self._read_lines('ports', 'open_ports.txt')),
+            'nuclei_findings': len(self._read_lines('vulnerabilities', 'nuclei_results.txt')),
+            'dalfox_findings': len(self._read_lines('vulnerabilities', 'dalfox_results.txt')),
+            'subzy_findings': len(self._read_lines('takeover', 'subzy_results.txt')),
+            'subjack_findings': len(self._read_lines('takeover', 'subjack_results.txt')),
+            'git_exposures': len(self._read_lines('git', 'exposed_git.txt')),
+            'cloud_aws': len(self._read_lines('cloud', 'aws_services.txt')),
+            'cloud_azure': len(self._read_lines('cloud', 'azure_services.txt')),
+            'cloud_gcp': len(self._read_lines('cloud', 'gcp_services.txt')),
+        }
+
+        diff_summary = {}
+        diff_summary_file = self.output_mgr.get_path('diff', 'diff_summary.json')
+        if diff_summary_file.exists():
+            with open(diff_summary_file, 'r') as f:
+                diff_summary = json.load(f)
+
         report = {
             'domain': self.domain,
             'timestamp': datetime.now().isoformat(),
-            'statistics': {},
-            'findings': {}
+            'scan_mode': scan_mode,
+            'scan_directory': str(self.output_mgr.base_dir),
+            'statistics': statistics,
+            'findings': {
+                'nuclei': self._read_lines('vulnerabilities', 'nuclei_results.txt'),
+                'dalfox': self._read_lines('vulnerabilities', 'dalfox_results.txt'),
+                'takeover': {
+                    'subzy': self._read_lines('takeover', 'subzy_results.txt'),
+                    'subjack': self._read_lines('takeover', 'subjack_results.txt'),
+                },
+                'git_exposure': self._read_lines('git', 'exposed_git.txt'),
+                'parameters': self._read_lines('parameters', 'interesting_parameters.txt'),
+                'cloud': {
+                    'aws': self._read_lines('cloud', 'aws_services.txt'),
+                    'azure': self._read_lines('cloud', 'azure_services.txt'),
+                    'gcp': self._read_lines('cloud', 'gcp_services.txt'),
+                },
+                'diff': diff_summary,
+            }
         }
-        
-        stats_files = {
-            'subdomains': self.output_mgr.get_path('subdomains', 'all_subdomains.txt'),
-            'resolved': self.output_mgr.get_path('dns', 'resolved.txt'),
-            'active_http': self.output_mgr.get_path('http', 'alive.txt'),
-            'urls': self.output_mgr.get_path('urls', 'urls_clean.txt'),
-        }
-        
-        for key, path in stats_files.items():
-            if path.exists():
-                with open(path, 'r') as f:
-                    report['statistics'][key] = sum(1 for line in f if line.strip())
-        
+
         json_file = self.output_mgr.get_path('reports', 'report.json')
         with open(json_file, 'w') as f:
             json.dump(report, f, indent=2)
@@ -1781,7 +2047,8 @@ class ReportGenerator:
 class GivEnum:
     """Main enumeration orchestrator"""
 
-    def __init__(self, domain: str, output_dir: str = './results', api_config: APIConfig = None):
+    def __init__(self, domain: str, output_dir: str = './results',
+                 api_config: APIConfig = None, notify: bool = True):
         self.domain = domain
         self.output_mgr = OutputManager(output_dir, domain)
         self.api_config = api_config or APIConfig()
@@ -1798,7 +2065,8 @@ class GivEnum:
         self.cloud_detector = CloudDetector(self.output_mgr)
         self.param_discovery = ParameterDiscovery(self.output_mgr)
         self.takeover_checker = TakeoverChecker(self.output_mgr)
-        self.diff_manager = DiffManager(self.output_mgr, domain)
+        self.notifier = NotificationManager(self.api_config, enabled=notify)
+        self.diff_manager = DiffManager(self.output_mgr, domain, notifier=self.notifier)
         self.report_generator = ReportGenerator(self.output_mgr, domain)
 
     def run_full_enum(self, skip_screenshots: bool = False, skip_portscan: bool = False,
@@ -1811,6 +2079,7 @@ class GivEnum:
         Active mode (--active): adds brute-force, port scan, nuclei, dalfox, subjack, arjun.
         """
         start_time = time.time()
+        reset_tool_log()
 
         if active:
             Logger.header(f"WEB ENUMERATION (ACTIVE): {self.domain}")
@@ -1839,7 +2108,7 @@ class GivEnum:
 
         if count_nonempty_lines(resolved_file) == 0:
             Logger.warning("No resolved subdomains found, stopping after DNS phase")
-            self._finalize_run(start_time)
+            self._finalize_run(start_time, active=active)
             return
 
         # 3. Cloud detection
@@ -1854,7 +2123,7 @@ class GivEnum:
 
         if not alive_file or count_nonempty_lines(alive_file) == 0:
             Logger.warning("No active hosts found, stopping after HTTP probing")
-            self._finalize_run(start_time)
+            self._finalize_run(start_time, active=active)
             return
 
         self.http_prober.check_urls_with_hakcheckurl(alive_file)
@@ -1917,17 +2186,17 @@ class GivEnum:
         self.diff_manager.diff_results()
 
         # 18. Generate reports
-        self.report_generator.generate_markdown_report()
-        self.report_generator.generate_json_report()
+        self.report_generator.generate_markdown_report(scan_mode='active' if active else 'passive')
+        self.report_generator.generate_json_report(scan_mode='active' if active else 'passive')
 
         # Summary
         self._print_summary(time.time() - start_time)
 
-    def _finalize_run(self, start_time: float):
+    def _finalize_run(self, start_time: float, active: bool = False):
         """Write partial results and print a summary before exiting early"""
         self.diff_manager.diff_results()
-        self.report_generator.generate_markdown_report()
-        self.report_generator.generate_json_report()
+        self.report_generator.generate_markdown_report(scan_mode='active' if active else 'passive')
+        self.report_generator.generate_json_report(scan_mode='active' if active else 'passive')
         elapsed = time.time() - start_time
         self._print_summary(elapsed)
 
@@ -1953,6 +2222,27 @@ class GivEnum:
         Logger.success(f"Results: {self.output_mgr.base_dir}")
         Logger.info(f"Report: {self.output_mgr.get_path('reports', 'report.md')}")
 
+        # Tool execution summary
+        if _tool_log:
+            Logger.header("TOOL EXECUTION SUMMARY")
+            ok = fail = skip = 0
+            for tool, info in sorted(_tool_log.items()):
+                st = info['status']
+                if st == 'ok':
+                    icon = Colors.OKGREEN + '✓' + Colors.ENDC
+                    ok += 1
+                elif st == 'not_found':
+                    icon = Colors.WARNING + '—' + Colors.ENDC
+                    skip += 1
+                else:
+                    icon = Colors.FAIL + '✗' + Colors.ENDC
+                    fail += 1
+                Logger.info(f"  {icon} {tool:<22} {st:<10} {info['elapsed']}s")
+            Logger.info(f"\n  ok={ok}  fail={fail}  not_found={skip}")
+            summary_path = self.output_mgr.get_path('logs', 'execution_summary.json')
+            with open(summary_path, 'w') as f:
+                json.dump(_tool_log, f, indent=2)
+
 
 def configure_api_keys():
     """Interactive API key configuration"""
@@ -1964,7 +2254,10 @@ def configure_api_keys():
         'virustotal': 'VirusTotal',
         'securitytrails': 'SecurityTrails',
         'certspotter': 'CertSpotter',
-        'shodan': 'Shodan'
+        'shodan': 'Shodan',
+        'discord_webhook': 'Discord Webhook URL',
+        'telegram_token': 'Telegram Bot Token',
+        'telegram_chat_id': 'Telegram Chat ID',
     }
     
     for key, name in services.items():
@@ -2010,6 +2303,8 @@ def main():
     parser.add_argument('--skip-vuln-scan', action='store_true', help='Skip vulnerability scan (active mode only)')
     parser.add_argument('--check-tools', action='store_true', help='Check tools')
     parser.add_argument('--configure-api', action='store_true', help='Configure API keys')
+    parser.add_argument('--no-notify', action='store_true',
+                        help='Disable Discord/Telegram notifications for this run')
 
     args = parser.parse_args()
 
@@ -2046,7 +2341,7 @@ def main():
 
     # Run enumeration
     try:
-        enum = GivEnum(args.domain, args.output)
+        enum = GivEnum(args.domain, args.output, notify=not args.no_notify)
         enum.run_full_enum(
             skip_screenshots=args.skip_screenshots,
             skip_portscan=args.skip_portscan,

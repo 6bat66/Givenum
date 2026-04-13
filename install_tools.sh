@@ -492,6 +492,7 @@ beautifulsoup4>=4.12.0
 lxml>=4.9.0
 urllib3>=2.0.0
 dnspython>=2.4.0
+flask>=3.0.0
 EOF
 
 if in_venv; then

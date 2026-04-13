@@ -1,0 +1,30 @@
+services:
+  # Fullstack dashboard with tools + UI
+  # Start: docker compose up app
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: givenum:latest
+    volumes:
+      - ./results:/app/results
+      - ${HOME}/.config/givenum:/root/.config/givenum
+    environment:
+      - RESULTS_DIR=/app/results
+      - GIVENUM_ROOT_DIR=/app
+      - GIVENUM_CONFIG_DIR=/root/.config/givenum
+      - GIVENUM_WEB_RUNTIME_DIR=/app/web-runtime
+      - GIVENUM_PASSWORD=${GIVENUM_PASSWORD:-}
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    restart: unless-stopped
+
+  # Optional CLI access using the same image
+  # Run: docker compose run --rm scanner -d example.com --active
+  scanner:
+    image: givenum:latest
+    volumes:
+      - ./results:/app/results
+      - ${HOME}/.config/givenum:/root/.config/givenum
+    entrypoint: ["/app/docker-entrypoint.sh", "scan"]
+    command: ["--help"]

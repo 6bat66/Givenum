@@ -1,0 +1,57 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #09090b;
+  --surface: #18181b;
+  --surface-2: #1f1f23;
+  --border: #27272a;
+  --border-subtle: #1f1f23;
+  --text: #fafafa;
+  --text-muted: #71717a;
+  --text-subtle: #52525b;
+  --cyan: #22d3ee;
+  --green: #4ade80;
+  --red: #f87171;
+  --orange: #fb923c;
+  --yellow: #facc15;
+  --purple: #a78bfa;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #3f3f46; }
+
+.font-mono { font-family: 'JetBrains Mono', 'Fira Code', monospace; }
+
+/* Severity badges */
+.sev-critical { background: #450a0a; color: #fca5a5; border: 1px solid #7f1d1d; }
+.sev-high     { background: #431407; color: #fdba74; border: 1px solid #7c2d12; }
+.sev-medium   { background: #422006; color: #fcd34d; border: 1px solid #78350f; }
+.sev-low      { background: #052e16; color: #86efac; border: 1px solid #14532d; }
+.sev-info     { background: #082f49; color: #7dd3fc; border: 1px solid #0c4a6e; }
+
+/* Tab styles */
+.tab-active {
+  background: #27272a;
+  color: #fafafa;
+  border-bottom: 2px solid var(--cyan);
+}
+.tab-inactive {
+  color: var(--text-muted);
+  border-bottom: 2px solid transparent;
+}
+.tab-inactive:hover { color: var(--text); background: #1f1f23; }

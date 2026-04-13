@@ -81,6 +81,27 @@ python3 GivEnum.py -d example.com --active --skip-vuln-scan
 python3 GivEnum.py -d example.com -o /path/to/output
 ```
 
+### Docker Dashboard
+
+```bash
+# Build and start the fullstack container (tools + web UI)
+docker compose up app --build
+
+# Open the dashboard
+http://localhost:3000
+
+# Optional: run a CLI scan using the same prepared image
+docker compose run --rm scanner -d example.com --active
+```
+
+The dashboard now supports:
+
+- Project separation for scans
+- Starting passive/active scans from the UI
+- Viewing running/completed jobs and logs
+- Configuring API keys from the UI
+- Opening generated scan analysis reports
+
 ---
 
 ## Documentation
@@ -544,6 +565,9 @@ results/*/diff/*.diff                            # Changes from last scan
 ```bash
 # Process multiple domains
 ./batch_enum.sh domains.txt
+
+# Process multiple domains in active mode
+./batch_enum.sh domains.txt --active
 
 # Parallel processing
 ./batch_enum.sh domains.txt --parallel 3

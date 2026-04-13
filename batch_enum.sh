@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ============================================================================
-# WebEnum Batch Processor
+# GivEnum Batch Processor
 # Process multiple domains efficiently
 # ============================================================================
 
@@ -22,7 +22,7 @@ error() { echo -e "${RED}[-]${NC} $1"; }
 header() { echo -e "\n${CYAN}========================================${NC}"; echo -e "${CYAN}$1${NC}"; echo -e "${CYAN}========================================${NC}\n"; }
 
 # Default settings
-WEBENUM_SCRIPT="./GivEnum.py"
+GIVENUM_SCRIPT="./GivEnum.py"
 LOG_DIR="./batch_logs"
 RESULTS_SUMMARY="${LOG_DIR}/batch_summary.txt"
 FAILED_DOMAINS="${LOG_DIR}/failed_domains.txt"
@@ -36,6 +36,7 @@ Arguments:
     domains_file        File with one domain per line
 
 Options:
+    --active            Enable active scanning
     --skip-screenshots  Skip screenshot capture
     --skip-portscan     Skip port scanning
     --skip-vuln-scan    Skip vulnerability scanning
@@ -47,6 +48,7 @@ Options:
 
 Examples:
     $0 domains.txt
+    $0 domains.txt --active
     $0 domains.txt --skip-screenshots --parallel 3
     $0 targets.txt -o /data/results --delay 60
 
@@ -82,6 +84,10 @@ CONTINUE_ON_ERROR=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --active)
+            EXTRA_ARGS="$EXTRA_ARGS --active"
+            shift
+            ;;
         --skip-screenshots)
             EXTRA_ARGS="$EXTRA_ARGS --skip-screenshots"
             shift
@@ -121,9 +127,9 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Verify webenum script
-if [ ! -f "$WEBENUM_SCRIPT" ]; then
-    error "WebEnum script not found: $WEBENUM_SCRIPT"
+# Verify GivEnum script
+if [ ! -f "$GIVENUM_SCRIPT" ]; then
+    error "GivEnum script not found: $GIVENUM_SCRIPT"
     exit 1
 fi
 
@@ -196,7 +202,7 @@ process_domain() {
     info "Scanning $domain..."
     info "Log: $log_file"
     
-    if python3 "$WEBENUM_SCRIPT" -d "$domain" $EXTRA_ARGS > "$log_file" 2>&1; then
+    if python3 "$GIVENUM_SCRIPT" -d "$domain" $EXTRA_ARGS > "$log_file" 2>&1; then
         success "✓ $domain complete"
         return 0
     else
@@ -217,7 +223,7 @@ export -f info
 export -f success
 export -f error
 export -f warning
-export WEBENUM_SCRIPT EXTRA_ARGS OUTPUT_DIR LOG_DIR PARALLEL_JOBS BLUE GREEN RED YELLOW NC
+export GIVENUM_SCRIPT EXTRA_ARGS OUTPUT_DIR LOG_DIR PARALLEL_JOBS BLUE GREEN RED YELLOW NC
 
 # Read domains
 mapfile -t DOMAINS < <(grep -v '^#' "$DOMAINS_FILE" | grep -v '^[[:space:]]*$')
@@ -351,10 +357,19 @@ info "Logs: $LOG_DIR"
 
 # Generate combined report
 if [ $SUCCESS -gt 0 ]; then
-    echo ""
-    read -p "$(echo -e ${YELLOW}Generate combined report? [y/N]: ${NC})" -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
+    GENERATE_COMBINED_REPORT=false
+    if [ -t 0 ]; then
+        echo ""
+        read -p "$(echo -e ${YELLOW}Generate combined report? [y/N]: ${NC})" -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            GENERATE_COMBINED_REPORT=true
+        fi
+    else
+        warning "Skipping combined report prompt in non-interactive mode"
+    fi
+
+    if [ "$GENERATE_COMBINED_REPORT" = true ]; then
         info "Generating combined report..."
         
         COMBINED_REPORT="${LOG_DIR}/combined_report.md"
@@ -385,7 +400,7 @@ EOF
         # Add results from each domain
         for result_dir in "${OUTPUT_DIR}/"*_*; do
             if [ -d "$result_dir" ]; then
-                domain=$(basename "$result_dir" | sed 's/_[0-9]*$//')
+                domain=$(basename "$result_dir" | sed 's/_[0-9]\{8\}_[0-9]\{6\}$//')
                 report="${result_dir}/reports/report.md"
                 
                 if [ -f "$report" ]; then
