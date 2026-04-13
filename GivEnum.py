@@ -96,11 +96,11 @@ class ToolChecker:
     """Checks if required tools are installed"""
 
     REQUIRED_TOOLS = {
-        'subdomain': ['subfinder', 'assetfinder', 'findomain', 'amass', 'knockpy'],
-        'dns': ['dnsx', 'puredns', 'massdns', 'dnsvalidator'],
+        'subdomain': ['subfinder', 'assetfinder', 'findomain', 'amass', 'knockpy', 'github-subdomains', 'uncover'],
+        'dns': ['dnsx', 'puredns', 'massdns', 'dnsvalidator', 'tlsx'],
         'http': ['httpx', 'hakcheckurl'],
-        'url_collect': ['xurlfind3r', 'waybackurls', 'gau', 'hakrawler', 'meg'],
-        'js_analysis': ['subjs', 'jsubfinder', 'getJS'],
+        'url_collect': ['xurlfind3r', 'waybackurls', 'gau', 'hakrawler', 'katana', 'meg'],
+        'js_analysis': ['subjs', 'jsubfinder', 'getJS', 'trufflehog'],
         'utils': ['anew', 'uro', 'unfurl', 'qsreplace', 'freq'],
         'scanning': ['nuclei', 'sdlookup'],
         'git': ['goop', 'git-dumper'],
@@ -479,9 +479,63 @@ class SubdomainEnum:
 
         return set()
 
+    def _discover_with_uncover(self) -> Set[str]:
+        """Multi-engine OSINT with uncover (Shodan/Censys/Fofa/Hunter/Netlas)"""
+        if not ToolChecker.check_tool('uncover'):
+            return set()
+
+        Logger.info("Running uncover (multi-engine OSINT)...")
+        output_file = self.output_mgr.get_path('subdomains', 'uncover.txt')
+
+        # Build engine list based on configured keys
+        engine_keys = {
+            'shodan':  self.api_config.get_key('shodan'),
+            'censys':  self.api_config.get_key('censys_id'),
+            'fofa':    self.api_config.get_key('fofa_email'),
+            'hunter':  self.api_config.get_key('hunter'),
+            'netlas':  self.api_config.get_key('netlas'),
+        }
+        # Always try shodan (InternetDB needs no key); include keyed engines when available
+        engines = ['shodan'] + [e for e, k in engine_keys.items() if k and e != 'shodan']
+
+        try:
+            _t0 = time.time()
+            cmd = [
+                'uncover',
+                '-q', f'ssl:"{self.domain}"',
+                '-e', ','.join(engines),
+                '-silent', '-o', str(output_file),
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            _track_captured('uncover', result, _t0, self.output_mgr.dirs['logs'])
+
+            if not output_file.exists():
+                return set()
+
+            with open(output_file) as f:
+                raw = set(line.strip() for line in f if line.strip())
+
+            # Filter to domain-related results and strip port suffixes
+            subs = set()
+            for entry in raw:
+                host = entry.split(':')[0] if ':' in entry else entry
+                if host and self.domain in host and not host[0].isdigit():
+                    subs.add(host.lstrip('*.'))
+
+            Logger.success(f"uncover: {len(subs)} hosts via {','.join(engines)}")
+            return subs
+
+        except subprocess.TimeoutExpired:
+            Logger.warning("uncover timeout")
+            return set()
+        except Exception as e:
+            Logger.error(f"Error in uncover: {e}")
+            return set()
+
     def run_all(self) -> Path:
         """Run all enumeration tools including APIs and CT logs"""
         Logger.header("SUBDOMAIN ENUMERATION")
+
 
         all_subs = set()
 
@@ -506,6 +560,29 @@ class SubdomainEnum:
         all_subs.update(apis.query_virustotal())
         all_subs.update(apis.query_alienvault())
         all_subs.update(apis.query_securitytrails())
+
+        # Uncover — multi-engine OSINT (Shodan, Censys, Fofa, Hunter, Netlas)
+        all_subs.update(self._discover_with_uncover())
+
+        # GitHub subdomain search
+        github_token = self.api_config.get_key('github_token')
+        if github_token and ToolChecker.check_tool('github-subdomains'):
+            Logger.info("Running github-subdomains...")
+            gh_file = self.output_mgr.get_path('subdomains', 'github_subdomains.txt')
+            try:
+                _t0 = time.time()
+                result = subprocess.run(
+                    ['github-subdomains', '-d', self.domain, '-t', github_token, '-o', str(gh_file)],
+                    capture_output=True, text=True, timeout=300
+                )
+                _track_captured('github-subdomains', result, _t0, self.output_mgr.dirs['logs'])
+                if gh_file.exists():
+                    with open(gh_file) as f:
+                        subs = set(line.strip() for line in f if line.strip())
+                    all_subs.update(subs)
+                    Logger.success(f"github-subdomains: {len(subs)} subdomains")
+            except Exception as e:
+                Logger.warning(f"github-subdomains error: {e}")
 
         # Add main domain
         all_subs.add(self.domain)
@@ -648,6 +725,46 @@ class DNSResolver:
                        self.output_mgr.dirs['logs'], stdout=out_f, timeout=300)
 
         Logger.success("DNS enrichment complete")
+
+    def discover_via_tlsx(self, resolved_file: Path) -> Set[str]:
+        """Extract subdomains from TLS certificates using tlsx (SANs + CN)"""
+        if not ToolChecker.check_tool('tlsx'):
+            return set()
+
+        Logger.info("Extracting subdomains from TLS certs with tlsx...")
+        output_file = self.output_mgr.get_path('subdomains', 'tlsx.txt')
+
+        try:
+            _t0 = time.time()
+            with open(output_file, 'w') as out_f:
+                run_logged('tlsx',
+                           ['tlsx', '-l', str(resolved_file), '-san', '-cn', '-silent', '-resp-only'],
+                           self.output_mgr.dirs['logs'], stdout=out_f, timeout=600)
+
+            if not output_file.exists():
+                return set()
+
+            with open(output_file) as f:
+                raw = set(line.strip() for line in f if line.strip())
+
+            # Keep only subdomains/domains (skip IPs and wildcards)
+            domain_root = self.output_mgr.domain
+            subs = set(
+                d.lstrip('*.') for d in raw
+                if d and not d[0].isdigit() and domain_root in d
+            )
+
+            with open(output_file, 'w') as f:
+                f.write('\n'.join(sorted(subs)) + '\n')
+
+            elapsed = round(time.time() - _t0, 1)
+            _tool_log['tlsx'] = {'status': 'ok', 'rc': 0, 'elapsed': elapsed, 'found': len(subs)}
+            Logger.success(f"tlsx: {len(subs)} domains from TLS certs")
+            return subs
+
+        except Exception as e:
+            Logger.error(f"Error in tlsx: {e}")
+            return set()
 
 
 class PortScanner:
@@ -850,6 +967,27 @@ class URLCollector:
         parsed = urlparse(value)
         return (parsed.hostname or parsed.netloc or '').strip().lower()
 
+    def _load_hosts(self, input_file: Path, limit: Optional[int] = None) -> List[str]:
+        with open(input_file, 'r') as f:
+            hosts = sorted({
+                self._extract_host(line)
+                for line in f
+                if self._extract_host(line)
+            })
+        return hosts[:limit] if limit else hosts
+
+    @staticmethod
+    def _chunked(items: List[str], chunk_size: int) -> List[List[str]]:
+        return [items[i:i + chunk_size] for i in range(0, len(items), chunk_size)]
+
+    @staticmethod
+    def _append_log(log_file: Path, header: str, content: str):
+        if not content:
+            return
+        with open(log_file, 'a') as f:
+            f.write(f"\n=== {header} ===\n")
+            f.write(content.rstrip() + '\n')
+
     def collect_with_xurlfind3r(self, input_file: Path) -> Set[str]:
         """Collect URLs using xurlfind3r (modern, efficient)"""
         if not ToolChecker.check_tool('xurlfind3r'):
@@ -858,36 +996,121 @@ class URLCollector:
         
         Logger.info("Collecting URLs with xurlfind3r...")
         output_file = self.output_mgr.get_path('urls', 'xurlfind3r.txt')
+        log_file = self.output_mgr.get_path('logs', 'xurlfind3r.log')
         
         try:
-            with open(input_file, 'r') as f:
-                domains = sorted({
-                    self._extract_host(line)
-                    for line in f
-                    if self._extract_host(line)
-                })
-            
+            domains = self._load_hosts(input_file, limit=30)
+            if not domains:
+                _tool_log['xurlfind3r'] = {'status': 'ok', 'rc': 0, 'elapsed': 0, 'hosts': 0, 'timeouts': 0, 'failures': 0}
+                with open(output_file, 'w') as f:
+                    f.write('')
+                Logger.success("xurlfind3r: 0 URLs (no hosts to process)")
+                return set()
+
             all_urls = set()
             _t0 = time.time()
-            for domain in domains[:50]:  # Limit to prevent excessive API calls
-                result = subprocess.run(
-                    ['xurlfind3r', '-d', domain, '--silent'],
-                    capture_output=True,
-                    text=True,
-                    timeout=60
-                )
-                urls = set(line.strip() for line in result.stdout.split('\n') if line.strip())
-                all_urls.update(urls)
-            _track_captured('xurlfind3r', result if domains else type('R', (), {'returncode': 0, 'stderr': ''})(), _t0, self.output_mgr.dirs['logs'])
+            timeouts = 0
+            failures = 0
+
+            for idx, domain in enumerate(domains, start=1):
+                try:
+                    result = subprocess.run(
+                        ['xurlfind3r', '-d', domain, '--silent'],
+                        capture_output=True,
+                        text=True,
+                        timeout=90
+                    )
+                    self._append_log(log_file, f"{domain} (rc={result.returncode})", result.stderr)
+
+                    if result.returncode != 0:
+                        failures += 1
+                        Logger.warning(f"xurlfind3r [{idx}/{len(domains)}] failed on {domain} (rc={result.returncode})")
+                        continue
+
+                    urls = set(line.strip() for line in result.stdout.split('\n') if line.strip())
+                    all_urls.update(urls)
+                    if idx == 1 or idx == len(domains) or idx % 10 == 0:
+                        Logger.info(f"xurlfind3r progress: {idx}/{len(domains)} hosts, {len(all_urls)} URLs")
+
+                except subprocess.TimeoutExpired as e:
+                    timeouts += 1
+                    self._append_log(log_file, f"{domain} (timeout)", (e.stderr or '') if isinstance(e.stderr, str) else '')
+                    Logger.warning(f"xurlfind3r timeout on {domain} [{idx}/{len(domains)}]")
+                except Exception as e:
+                    failures += 1
+                    self._append_log(log_file, f"{domain} (error)", str(e))
+                    Logger.warning(f"xurlfind3r error on {domain}: {e}")
+
+            _tool_log['xurlfind3r'] = {
+                'status': 'ok' if all_urls or failures + timeouts < len(domains) else 'fail',
+                'rc': 0 if all_urls else (-1 if timeouts else 1),
+                'elapsed': round(time.time() - _t0, 1),
+                'hosts': len(domains),
+                'timeouts': timeouts,
+                'failures': failures,
+            }
 
             with open(output_file, 'w') as f:
                 f.write('\n'.join(sorted(all_urls)) + '\n')
 
-            Logger.success(f"xurlfind3r: {len(all_urls)} URLs")
+            Logger.success(
+                f"xurlfind3r: {len(all_urls)} URLs "
+                f"(hosts={len(domains)}, timeouts={timeouts}, failures={failures})"
+            )
             return all_urls
             
         except Exception as e:
             Logger.error(f"Error in xurlfind3r: {e}")
+            return set()
+
+    def collect_with_katana(self, input_file: Path) -> Set[str]:
+        """Crawl URLs with katana (ProjectDiscovery)"""
+        if not ToolChecker.check_tool('katana'):
+            return set()
+
+        Logger.info("Crawling with katana...")
+        output_file = self.output_mgr.get_path('urls', 'katana.txt')
+        log_file = self.output_mgr.get_path('logs', 'katana.log')
+
+        try:
+            _t0 = time.time()
+            with open(input_file, 'r') as f:
+                hosts = [line.strip() for line in f if line.strip()]
+            if not hosts:
+                return set()
+
+            all_urls = set()
+            for idx, host in enumerate(hosts[:50], start=1):
+                try:
+                    result = subprocess.run(
+                        ['katana', '-u', host, '-silent', '-depth', '2',
+                         '-timeout', '10', '-rate-limit', '150'],
+                        capture_output=True,
+                        text=True,
+                        timeout=90
+                    )
+                    self._append_log(log_file, f"{host} (rc={result.returncode})", result.stderr)
+                    batch_urls = set(line.strip() for line in result.stdout.split('\n') if line.strip())
+                    all_urls.update(batch_urls)
+                    if idx == 1 or idx % 10 == 0 or idx == len(hosts):
+                        Logger.info(f"katana progress: {idx}/{min(len(hosts), 50)} hosts, {len(all_urls)} URLs")
+                except subprocess.TimeoutExpired:
+                    self._append_log(log_file, f"{host} (timeout)", '')
+                    Logger.warning(f"katana timeout on {host}")
+                except Exception as e:
+                    self._append_log(log_file, f"{host} (error)", str(e))
+
+            _track_captured('katana', type('obj', (object,), {'returncode': 0, 'stderr': ''})(), _t0, self.output_mgr.dirs['logs'])
+            _tool_log['katana'] = {'status': 'ok', 'rc': 0, 'elapsed': round(time.time() - _t0, 1), 'urls': len(all_urls)}
+
+            with open(output_file, 'w') as f:
+                f.write('\n'.join(sorted(all_urls)) + '\n')
+
+            Logger.success(f"katana: {len(all_urls)} URLs")
+            return all_urls
+
+        except Exception as e:
+            Logger.error(f"Error in katana: {e}")
             return set()
 
     def collect_from_archives(self, input_file: Path) -> Set[str]:
@@ -899,73 +1122,127 @@ class URLCollector:
         # xurlfind3r (primary)
         all_urls.update(self.collect_with_xurlfind3r(input_file))
 
+        # katana (active crawler)
+        all_urls.update(self.collect_with_katana(input_file))
+
         # hakrawler (crawl-based)
         all_urls.update(self.collect_with_hakrawler(input_file))
 
-        # GAU (backup)
+        # GAU — run only on root domain + www to avoid per-subdomain archive explosion
+        # (gau takes 3+ min per domain; running on all 200 subdomains would never finish)
         if ToolChecker.check_tool('gau'):
-            Logger.info("Running gau...")
+            Logger.info("Running gau (root domain + www)...")
             gau_file = self.output_mgr.get_path('urls', 'gau.txt')
+            gau_log = self.output_mgr.get_path('logs', 'gau.log')
 
             try:
-                with open(input_file, 'r') as f:
-                    domains = sorted({
-                        self._extract_host(line)
-                        for line in f
-                        if self._extract_host(line)
-                    })
+                # Only the root domain and www — archives are richest there
+                root = self.output_mgr.domain
+                archive_targets = list({root, f'www.{root}'})
 
+                urls = set()
+                timeouts = 0
+                failures = 0
                 _t0 = time.time()
-                result = subprocess.run(
-                    ['gau', '--subs'],
-                    input='\n'.join(domains[:30]),
-                    capture_output=True,
-                    text=True,
-                    timeout=600
-                )
-                _track_captured('gau', result, _t0, self.output_mgr.dirs['logs'])
+                for idx, domain in enumerate(archive_targets, start=1):
+                    try:
+                        result = subprocess.run(
+                            ['gau', '--timeout', '60'],
+                            input=domain,
+                            capture_output=True,
+                            text=True,
+                            timeout=240
+                        )
+                        self._append_log(gau_log, f"{domain} (rc={result.returncode})", result.stderr)
 
-                urls = set(line.strip() for line in result.stdout.split('\n') if line.strip())
-                all_urls.update(urls)
+                        if result.returncode != 0:
+                            failures += 1
+                            Logger.warning(f"gau failed on {domain} (rc={result.returncode})")
+                            continue
+
+                        batch_urls = set(line.strip() for line in result.stdout.split('\n') if line.strip())
+                        urls.update(batch_urls)
+                        all_urls.update(batch_urls)
+                        Logger.info(f"gau: {domain} → {len(batch_urls)} URLs (total: {len(urls)})")
+
+                    except subprocess.TimeoutExpired:
+                        timeouts += 1
+                        self._append_log(gau_log, f"{domain} (timeout)", '')
+                        Logger.warning(f"gau timeout on {domain}")
+                    except Exception as e:
+                        failures += 1
+                        Logger.warning(f"gau error on {domain}: {e}")
+
+                _tool_log['gau'] = {
+                    'status': 'ok' if urls else ('timeout' if timeouts else 'fail'),
+                    'rc': 0 if urls else -1,
+                    'elapsed': round(time.time() - _t0, 1),
+                    'timeouts': timeouts,
+                    'failures': failures,
+                }
 
                 with open(gau_file, 'w') as f:
                     f.write('\n'.join(sorted(urls)) + '\n')
 
-                Logger.success(f"gau: {len(urls)} URLs")
+                Logger.success(f"gau: {len(urls)} URLs (timeouts={timeouts}, failures={failures})")
 
             except Exception as e:
                 Logger.error(f"Error in gau: {e}")
 
-        # Waybackurls
+        # Waybackurls — root domain + www only (same reason as gau: ~3 min per domain)
         if ToolChecker.check_tool('waybackurls'):
-            Logger.info("Running waybackurls...")
+            Logger.info("Running waybackurls (root domain + www)...")
             wayback_file = self.output_mgr.get_path('urls', 'waybackurls.txt')
+            wayback_log = self.output_mgr.get_path('logs', 'waybackurls.log')
 
             try:
-                with open(input_file, 'r') as f:
-                    # waybackurls needs bare hostnames, not full URLs
-                    domain_names = '\n'.join(
-                        self._extract_host(line) for line in f
-                        if self._extract_host(line.strip())
-                    )
+                root = self.output_mgr.domain
+                archive_targets = list({root, f'www.{root}'})
 
+                urls = set()
+                timeouts = 0
+                failures = 0
                 _t0 = time.time()
-                result = subprocess.run(
-                    ['waybackurls'],
-                    input=domain_names,
-                    capture_output=True,
-                    text=True,
-                    timeout=600
-                )
-                _track_captured('waybackurls', result, _t0, self.output_mgr.dirs['logs'])
+                for idx, domain in enumerate(archive_targets, start=1):
+                    try:
+                        result = subprocess.run(
+                            ['waybackurls', domain],
+                            capture_output=True,
+                            text=True,
+                            timeout=240
+                        )
+                        self._append_log(wayback_log, f"{domain} (rc={result.returncode})", result.stderr)
 
-                urls = set(line.strip() for line in result.stdout.split('\n') if line.strip())
-                all_urls.update(urls)
+                        if result.returncode != 0:
+                            failures += 1
+                            Logger.warning(f"waybackurls failed on {domain} (rc={result.returncode})")
+                            continue
+
+                        batch_urls = set(line.strip() for line in result.stdout.split('\n') if line.strip())
+                        urls.update(batch_urls)
+                        all_urls.update(batch_urls)
+                        Logger.info(f"waybackurls: {domain} → {len(batch_urls)} URLs (total: {len(urls)})")
+
+                    except subprocess.TimeoutExpired:
+                        timeouts += 1
+                        self._append_log(wayback_log, f"{domain} (timeout)", '')
+                        Logger.warning(f"waybackurls timeout on {domain}")
+                    except Exception as e:
+                        failures += 1
+                        Logger.warning(f"waybackurls error on {domain}: {e}")
+
+                _tool_log['waybackurls'] = {
+                    'status': 'ok' if urls else ('timeout' if timeouts else 'fail'),
+                    'rc': 0 if urls else -1,
+                    'elapsed': round(time.time() - _t0, 1),
+                    'timeouts': timeouts,
+                    'failures': failures,
+                }
 
                 with open(wayback_file, 'w') as f:
                     f.write('\n'.join(sorted(urls)) + '\n')
 
-                Logger.success(f"waybackurls: {len(urls)} URLs")
+                Logger.success(f"waybackurls: {len(urls)} URLs (timeouts={timeouts}, failures={failures})")
 
             except Exception as e:
                 Logger.error(f"Error in waybackurls: {e}")
@@ -1299,8 +1576,63 @@ class JSAnalyzer:
         # Analyze with jsubfinder
         if all_js:
             self.analyze_with_jsubfinder(all_js_file)
-        
+
+        # Secret scanning with trufflehog
+        self.scan_secrets_with_trufflehog()
+
         return all_js
+
+    def scan_secrets_with_trufflehog(self):
+        """Scan downloaded JS and git dumps for secrets with trufflehog"""
+        if not ToolChecker.check_tool('trufflehog'):
+            return
+
+        Logger.info("Scanning for secrets with trufflehog...")
+        output_file = self.output_mgr.get_path('js', 'trufflehog_secrets.json')
+        scan_paths = [
+            self.output_mgr.dirs['js'],
+            self.output_mgr.dirs['git'],
+        ]
+
+        findings = []
+        for scan_path in scan_paths:
+            if not scan_path.exists():
+                continue
+            try:
+                _t0 = time.time()
+                result = subprocess.run(
+                    ['trufflehog', 'filesystem', str(scan_path),
+                     '--json', '--no-verification'],
+                    capture_output=True, text=True, timeout=300
+                )
+                _track_captured(f'trufflehog_{scan_path.name}', result, _t0, self.output_mgr.dirs['logs'])
+
+                for line in result.stdout.splitlines():
+                    line = line.strip()
+                    if line:
+                        try:
+                            findings.append(json.loads(line))
+                        except json.JSONDecodeError:
+                            pass
+            except subprocess.TimeoutExpired:
+                Logger.warning(f"trufflehog timeout on {scan_path.name}")
+            except Exception as e:
+                Logger.warning(f"trufflehog error on {scan_path.name}: {e}")
+
+        if findings:
+            with open(output_file, 'w') as f:
+                json.dump(findings, f, indent=2)
+            Logger.warning(f"trufflehog: {len(findings)} potential secrets found → {output_file}")
+            # Write a readable summary
+            summary_file = self.output_mgr.get_path('js', 'trufflehog_summary.txt')
+            with open(summary_file, 'w') as f:
+                for item in findings:
+                    det = item.get('DetectorName', 'unknown')
+                    raw = item.get('Raw', '')[:80]
+                    src = item.get('SourceMetadata', {}).get('Data', {})
+                    f.write(f"[{det}] {raw}\n  source: {src}\n\n")
+        else:
+            Logger.success("trufflehog: no secrets found")
 
 
 class GitDumper:
@@ -2106,6 +2438,23 @@ class GivEnum:
         resolved_file = self.dns_resolver.resolve_with_puredns(subs_file)
         self.dns_resolver.enrich_with_dnsx(resolved_file)
 
+        # 2b. TLS cert extraction — find subdomains in SANs of live certs
+        tlsx_subs = self.dns_resolver.discover_via_tlsx(resolved_file)
+        if tlsx_subs:
+            with open(resolved_file) as f:
+                existing_resolved = set(line.strip() for line in f if line.strip())
+            new_from_tls = tlsx_subs - existing_resolved
+            if new_from_tls:
+                Logger.success(f"tlsx found {len(new_from_tls)} new subdomains from TLS certs")
+                with open(resolved_file, 'a') as f:
+                    for sub in sorted(new_from_tls):
+                        f.write(sub + '\n')
+                # Also merge into all_subdomains.txt
+                all_subs_file = self.output_mgr.get_path('subdomains', 'all_subdomains.txt')
+                with open(all_subs_file, 'a') as f:
+                    for sub in sorted(new_from_tls):
+                        f.write(sub + '\n')
+
         if count_nonempty_lines(resolved_file) == 0:
             Logger.warning("No resolved subdomains found, stopping after DNS phase")
             self._finalize_run(start_time, active=active)
@@ -2254,7 +2603,14 @@ def configure_api_keys():
         'virustotal': 'VirusTotal',
         'securitytrails': 'SecurityTrails',
         'certspotter': 'CertSpotter',
-        'shodan': 'Shodan',
+        'shodan': 'Shodan (also used by uncover)',
+        'censys_id': 'Censys API ID (uncover)',
+        'censys_secret': 'Censys API Secret (uncover)',
+        'fofa_email': 'Fofa Email (uncover)',
+        'fofa_key': 'Fofa API Key (uncover)',
+        'hunter': 'Hunter.io API Key (uncover)',
+        'netlas': 'Netlas API Key (uncover)',
+        'github_token': 'GitHub Personal Access Token (github-subdomains)',
         'discord_webhook': 'Discord Webhook URL',
         'telegram_token': 'Telegram Bot Token',
         'telegram_chat_id': 'Telegram Chat ID',

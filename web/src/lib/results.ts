@@ -8,25 +8,32 @@ type ReportMeta = {
 }
 
 function readLines(filePath: string): string[] {
-  if (!fs.existsSync(filePath)) return []
-  return fs
-    .readFileSync(filePath, 'utf-8')
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
+  try {
+    if (!fs.existsSync(filePath)) return []
+    return fs
+      .readFileSync(filePath, 'utf-8')
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+  } catch {
+    return []
+  }
 }
 
 function readJsonl(filePath: string): Record<string, unknown>[] {
-  if (!fs.existsSync(filePath)) return []
-  const rows: Record<string, unknown>[] = []
-  for (const line of readLines(filePath)) {
-    try { rows.push(JSON.parse(line)) } catch { /* skip bad row */ }
+  try {
+    if (!fs.existsSync(filePath)) return []
+    const rows: Record<string, unknown>[] = []
+    for (const line of readLines(filePath)) {
+      try { rows.push(JSON.parse(line)) } catch { /* skip bad row */ }
+    }
+    return rows
+  } catch {
+    return []
   }
-  return rows
 }
 
 function readJson<T>(filePath: string): T | null {
-  if (!fs.existsSync(filePath)) return null
   try { return JSON.parse(fs.readFileSync(filePath, 'utf-8')) as T }
   catch { return null }
 }
@@ -140,7 +147,11 @@ export function resolveScanDir(scanId: string): string | null {
     return null
   }
 
-  if (!fs.existsSync(scanDir) || !fs.statSync(scanDir).isDirectory()) {
+  try {
+    if (!fs.existsSync(scanDir) || !fs.statSync(scanDir).isDirectory()) {
+      return null
+    }
+  } catch {
     return null
   }
 
@@ -154,8 +165,12 @@ export function resolveScanDir(scanId: string): string | null {
 export function deleteScan(scanId: string): boolean {
   const scanDir = resolveScanDir(scanId)
   if (!scanDir) return false
-  fs.rmSync(scanDir, { recursive: true, force: true })
-  return true
+  try {
+    fs.rmSync(scanDir, { recursive: true, force: true })
+    return true
+  } catch {
+    return false
+  }
 }
 
 export function listScans(projectId?: string): ScanMeta[] {
@@ -267,9 +282,14 @@ export function getScan(scanId: string): ScanData | null {
   }
 
   const screenshotsDir = path.join(scanDir, 'screenshots')
-  const screenshots = fs.existsSync(screenshotsDir)
-    ? fs.readdirSync(screenshotsDir).filter((file) => /\.(png|jpg|jpeg|webp)$/i.test(file))
-    : []
+  let screenshots: string[] = []
+  try {
+    screenshots = fs.existsSync(screenshotsDir)
+      ? fs.readdirSync(screenshotsDir).filter((file) => /\.(png|jpg|jpeg|webp)$/i.test(file))
+      : []
+  } catch {
+    screenshots = []
+  }
 
   const subdomains = readLines(path.join(scanDir, 'subdomains', 'all_subdomains.txt'))
 

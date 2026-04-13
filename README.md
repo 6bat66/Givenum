@@ -220,15 +220,20 @@ results/example.com_20250122_123456/
 | assetfinder | Subdomain enumeration |
 | findomain | Fast subdomain finder |
 | amass | In-depth subdomain enum |
+| github-subdomains | GitHub code search for subdomains (needs token) |
+| uncover | Multi-engine OSINT — Shodan, Censys, Fofa, Hunter, Netlas |
+| tlsx | TLS cert SAN extraction for new subdomains |
 | dnsx | Fast DNS resolver |
 | httpx | HTTP probe & analyzer |
 | gowitness | Screenshot capture |
 | xurlfind3r | Unified URL finder |
-| gau | Get All URLs (archive) |
-| waybackurls | Wayback Machine URLs |
+| gau | Get All URLs (archive, root domain) |
+| waybackurls | Wayback Machine URLs (root domain) |
+| katana | Modern active web crawler |
 | hakrawler | Web crawler |
 | subjs / getJS | JS file collection |
 | jsubfinder | JS endpoint finder |
+| trufflehog | Secret scanning in JS and git dumps |
 | subzy | Subdomain takeover check |
 | goop / git-dumper | Git repo dumper |
 

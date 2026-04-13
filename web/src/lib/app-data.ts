@@ -5,22 +5,44 @@ import type { ProjectMeta, ScanJob } from './types'
 
 const DEFAULT_PROJECT_ID = 'default'
 
-function ensureDir(dirPath: string) {
-  fs.mkdirSync(dirPath, { recursive: true })
+function ensureDir(dirPath: string): boolean {
+  try {
+    fs.mkdirSync(dirPath, { recursive: true })
+    return true
+  } catch {
+    return false
+  }
+}
+
+function resolveUsableDir(candidates: string[]): string {
+  for (const candidate of candidates) {
+    if (ensureDir(candidate)) {
+      return candidate
+    }
+  }
+
+  return candidates[candidates.length - 1]
 }
 
 function readJson<T>(filePath: string, fallback: T): T {
-  if (!fs.existsSync(filePath)) return fallback
   try {
+    if (!fs.existsSync(filePath)) return fallback
     return JSON.parse(fs.readFileSync(filePath, 'utf-8')) as T
   } catch {
     return fallback
   }
 }
 
-function writeJson(filePath: string, data: unknown) {
-  ensureDir(path.dirname(filePath))
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2))
+function writeJson(filePath: string, data: unknown): boolean {
+  try {
+    if (!ensureDir(path.dirname(filePath))) {
+      return false
+    }
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2))
+    return true
+  } catch {
+    return false
+  }
 }
 
 function slugify(value: string): string {
@@ -37,16 +59,31 @@ export function getWorkspaceRoot(): string {
   return process.env.GIVENUM_ROOT_DIR || path.resolve(process.cwd(), '..')
 }
 
+export function getConfigDir(): string {
+  const workspaceRoot = getWorkspaceRoot()
+  const preferred = process.env.GIVENUM_CONFIG_DIR || path.join(process.env.HOME || workspaceRoot, '.config', 'givenum')
+
+  return resolveUsableDir([
+    preferred,
+    path.join(workspaceRoot, '.givenum-config'),
+    path.join('/tmp', 'givenum-config'),
+  ])
+}
+
 export function getResultsDir(): string {
-  return process.env.RESULTS_DIR || path.join(getWorkspaceRoot(), 'results')
+  const workspaceRoot = getWorkspaceRoot()
+  const preferred = process.env.RESULTS_DIR || path.join(workspaceRoot, 'results')
+
+  return resolveUsableDir([
+    preferred,
+    path.join(getConfigDir(), 'runtime', 'results'),
+    path.join(workspaceRoot, '.givenum-runtime', 'results'),
+    path.join('/tmp', 'givenum-results'),
+  ])
 }
 
 function getDefaultProjectResultsDir(): string {
   return path.join(getResultsDir(), DEFAULT_PROJECT_ID)
-}
-
-export function getConfigDir(): string {
-  return process.env.GIVENUM_CONFIG_DIR || path.join(process.env.HOME || getWorkspaceRoot(), '.config', 'givenum')
 }
 
 function getProjectsFile(): string {
@@ -125,7 +162,9 @@ export function createProject(input: { name: string; description?: string }): Pr
     ...project,
     resultsPath: '',
   })
-  writeJson(getProjectsFile(), existing)
+  if (!writeJson(getProjectsFile(), existing)) {
+    throw new Error('Falha ao salvar projeto')
+  }
   ensureDir(project.resultsPath)
   return project
 }
@@ -142,7 +181,9 @@ export function writeApiKeys(keys: Record<string, string>) {
       .map(([key, value]) => [key, value.trim()])
       .filter(([, value]) => value.length > 0)
   )
-  writeJson(getApiKeysFile(), cleaned)
+  if (!writeJson(getApiKeysFile(), cleaned)) {
+    throw new Error('Falha ao salvar API keys')
+  }
 }
 
 export function maskApiKeys(keys: Record<string, string>): Record<string, string> {
@@ -174,17 +215,23 @@ export function getJob(jobId: string): ScanJob | null {
 
 export function listJobs(): ScanJob[] {
   ensureAppLayout()
-  return fs
-    .readdirSync(getJobsDir())
-    .filter((entry) => entry.endsWith('.json'))
-    .map((entry) => readJson<ScanJob | null>(path.join(getJobsDir(), entry), null))
-    .filter((job): job is ScanJob => Boolean(job))
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  try {
+    return fs
+      .readdirSync(getJobsDir())
+      .filter((entry) => entry.endsWith('.json'))
+      .map((entry) => readJson<ScanJob | null>(path.join(getJobsDir(), entry), null))
+      .filter((job): job is ScanJob => Boolean(job))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  } catch {
+    return []
+  }
 }
 
 export function writeJob(job: ScanJob) {
   ensureAppLayout()
-  writeJson(path.join(getJobsDir(), `${job.id}.json`), job)
+  if (!writeJson(path.join(getJobsDir(), `${job.id}.json`), job)) {
+    throw new Error('Falha ao salvar job')
+  }
 }
 
 export function getJobFile(jobId: string): string {
@@ -194,9 +241,13 @@ export function getJobFile(jobId: string): string {
 
 export function deleteJob(jobId: string): boolean {
   const filePath = path.join(getJobsDir(), `${jobId}.json`)
-  if (!fs.existsSync(filePath)) return false
-  fs.unlinkSync(filePath)
-  return true
+  try {
+    if (!fs.existsSync(filePath)) return false
+    fs.unlinkSync(filePath)
+    return true
+  } catch {
+    return false
+  }
 }
 
 export function deleteProject(projectId: string): boolean {
@@ -204,8 +255,7 @@ export function deleteProject(projectId: string): boolean {
   const projects = readJson<ProjectMeta[]>(getProjectsFile(), [])
   const filtered = projects.filter((project) => project.id !== projectId)
   if (filtered.length === projects.length) return false
-  writeJson(getProjectsFile(), filtered)
-  return true
+  return writeJson(getProjectsFile(), filtered)
 }
 
 export function getProjectOutputDir(projectId: string): string {

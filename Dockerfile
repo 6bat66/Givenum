@@ -65,6 +65,7 @@ RUN go install github.com/hueristiq/xurlfind3r/cmd/xurlfind3r@latest 2>/dev/null
 RUN go install github.com/lc/gau/v2/cmd/gau@latest 2>/dev/null || echo "[!] gau failed (non-critical)"
 RUN go install github.com/tomnomnom/waybackurls@latest 2>/dev/null || echo "[!] waybackurls failed (non-critical)"
 RUN go install github.com/hakluke/hakrawler@latest 2>/dev/null || echo "[!] hakrawler failed (non-critical)"
+RUN go install github.com/projectdiscovery/katana/cmd/katana@latest 2>/dev/null || echo "[!] katana failed (non-critical)"
 RUN go install github.com/tomnomnom/meg@latest 2>/dev/null || echo "[!] meg failed (non-critical)"
 RUN go install github.com/lc/subjs@latest 2>/dev/null || echo "[!] subjs failed (non-critical)"
 RUN go install github.com/003random/getJS@latest 2>/dev/null || echo "[!] getJS failed (non-critical)"
@@ -76,6 +77,9 @@ RUN go install github.com/hahwul/dalfox/v2@latest 2>/dev/null || echo "[!] dalfo
 RUN go install github.com/PentestPad/subzy@latest 2>/dev/null || echo "[!] subzy failed (non-critical)"
 RUN go install github.com/haccer/subjack@latest 2>/dev/null || echo "[!] subjack failed (non-critical)"
 RUN go install github.com/owasp-amass/amass/v4/...@latest 2>/dev/null || echo "[!] amass install failed (non-critical)"
+RUN go install github.com/gwen001/github-subdomains@latest 2>/dev/null || echo "[!] github-subdomains failed (non-critical)"
+RUN go install github.com/projectdiscovery/uncover/cmd/uncover@latest 2>/dev/null || echo "[!] uncover failed (non-critical)"
+RUN go install github.com/projectdiscovery/tlsx/cmd/tlsx@latest 2>/dev/null || echo "[!] tlsx failed (non-critical)"
 
 RUN git clone --depth=1 -q https://github.com/blechschmidt/massdns /tmp/massdns && \
     cd /tmp/massdns && make -s 2>/dev/null && \
@@ -93,6 +97,9 @@ RUN git clone --depth=1 -q https://github.com/nyancrimew/goop /tmp/goop && \
 RUN git clone --depth=1 -q https://github.com/ThreatUnknown/jsubfinder /tmp/jsubfinder && \
     cd /tmp/jsubfinder && go build -o /root/go/bin/jsubfinder . 2>/dev/null && \
     rm -rf /tmp/jsubfinder || echo "[!] jsubfinder build failed (non-critical)"
+
+RUN curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh \
+    | sh -s -- -b /root/go/bin 2>/dev/null || echo "[!] trufflehog install failed (non-critical)"
 
 RUN nuclei -update-templates 2>/dev/null || true
 

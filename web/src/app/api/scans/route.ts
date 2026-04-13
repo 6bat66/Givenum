@@ -6,9 +6,17 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
   const projectId = searchParams.get('project') || undefined
 
-  return NextResponse.json({
-    projects: listProjects(),
-    scans: listScans(projectId),
-    jobs: listJobs(),
-  })
+  try {
+    return NextResponse.json({
+      projects: listProjects(),
+      scans: listScans(projectId),
+      jobs: listJobs(),
+    })
+  } catch {
+    return NextResponse.json({
+      projects: [],
+      scans: [],
+      jobs: [],
+    })
+  }
 }

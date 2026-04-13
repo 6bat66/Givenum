@@ -150,11 +150,27 @@ function JobCard({ job }: { job: ScanJob }) {
 }
 
 export default async function Home() {
-  const [scans, projects, jobs] = await Promise.all([
-    Promise.resolve(listScans()),
-    Promise.resolve(listProjects()),
-    Promise.resolve(listJobs()),
-  ])
+  let scans: ScanMeta[] = []
+  let projects: ProjectMeta[] = []
+  let jobs: ScanJob[] = []
+
+  try {
+    ;[scans, projects, jobs] = await Promise.all([
+      Promise.resolve(listScans()),
+      Promise.resolve(listProjects()),
+      Promise.resolve(listJobs()),
+    ])
+  } catch {
+    scans = []
+    projects = [{
+      id: 'default',
+      name: 'Default',
+      description: 'Scans not assigned to a custom project',
+      createdAt: new Date(0).toISOString(),
+      resultsPath: '',
+    }]
+    jobs = []
+  }
 
   const uniqueDomains = new Set(scans.map((scan) => scan.domain)).size
   const totalVulns = scans.reduce((acc, scan) => acc + scan.stats.vulns, 0)
