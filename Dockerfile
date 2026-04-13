@@ -43,7 +43,7 @@ RUN ARCH=$(uname -m) && \
       aarch64|arm64)  GOARCH="arm64" ;; \
       *) echo "Unsupported arch: $ARCH" && exit 1 ;; \
     esac && \
-    GO_VERSION=1.25.9 && \
+    GO_VERSION=1.24.2 && \
     curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${GOARCH}.tar.gz" \
       | tar -C /usr/local -xz
 
@@ -57,7 +57,8 @@ RUN python3 -m pip install --break-system-packages -q \
     knockpy \
     uro \
     git-dumper \
-    arjun
+    arjun \
+    photon-scanner 2>/dev/null || true
 
 RUN go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest && \
     go install github.com/tomnomnom/assetfinder@latest && \
@@ -87,6 +88,7 @@ RUN go install github.com/owasp-amass/amass/v4/...@latest 2>/dev/null || echo "[
 RUN go install github.com/gwen001/github-subdomains@latest 2>/dev/null || echo "[!] github-subdomains failed (non-critical)"
 RUN go install github.com/projectdiscovery/uncover/cmd/uncover@latest 2>/dev/null || echo "[!] uncover failed (non-critical)"
 RUN go install github.com/projectdiscovery/tlsx/cmd/tlsx@latest 2>/dev/null || echo "[!] tlsx failed (non-critical)"
+RUN go install github.com/vortexau/dnsvalidator@latest 2>/dev/null || echo "[!] dnsvalidator failed (non-critical)"
 
 RUN git clone --depth=1 -q https://github.com/blechschmidt/massdns /tmp/massdns && \
     cd /tmp/massdns && make -s 2>/dev/null && \

@@ -97,7 +97,7 @@ class ToolChecker:
 
     REQUIRED_TOOLS = {
         'subdomain': ['subfinder', 'assetfinder', 'findomain', 'amass', 'knockpy', 'github-subdomains', 'uncover'],
-        'dns': ['dnsx', 'puredns', 'massdns', 'dnsvalidator', 'tlsx'],
+        'dns': ['dnsx', 'puredns', 'massdns', 'tlsx'],
         'http': ['httpx', 'hakcheckurl'],
         'url_collect': ['xurlfind3r', 'waybackurls', 'gau', 'hakrawler', 'katana', 'meg'],
         'js_analysis': ['subjs', 'jsubfinder', 'getJS', 'trufflehog'],
@@ -506,7 +506,21 @@ class SubdomainEnum:
                 '-e', ','.join(engines),
                 '-silent', '-o', str(output_file),
             ]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            # Pass API keys via environment variables (uncover reads these natively)
+            env = os.environ.copy()
+            key_map = {
+                'shodan':        ('SHODAN_API_KEY',   self.api_config.get_key('shodan')),
+                'censys_id':     ('CENSYS_API_ID',    self.api_config.get_key('censys_id')),
+                'censys_secret': ('CENSYS_API_SECRET',self.api_config.get_key('censys_secret')),
+                'fofa_email':    ('FOFA_EMAIL',        self.api_config.get_key('fofa_email')),
+                'fofa_key':      ('FOFA_KEY',          self.api_config.get_key('fofa_key')),
+                'hunter':        ('HUNTER_API_KEY',    self.api_config.get_key('hunter')),
+                'netlas':        ('NETLAS_API_KEY',    self.api_config.get_key('netlas')),
+            }
+            for _, (env_var, value) in key_map.items():
+                if value:
+                    env[env_var] = value
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300, env=env)
             _track_captured('uncover', result, _t0, self.output_mgr.dirs['logs'])
 
             if not output_file.exists():
