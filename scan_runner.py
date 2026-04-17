@@ -27,8 +27,10 @@ def load_job(job_file: Path) -> Optional[dict]:
 
 def save_job(job_file: Path, data: dict):
     job_file.parent.mkdir(parents=True, exist_ok=True)
-    with open(job_file, 'w') as f:
+    tmp = job_file.with_suffix('.tmp')
+    with open(tmp, 'w') as f:
         json.dump(data, f, indent=2)
+    tmp.replace(job_file)  # atomic rename
 
 
 def update_job(job_file: Path, **fields) -> bool:
@@ -64,7 +66,7 @@ def main():
     parser = argparse.ArgumentParser(description='Run a GivEnum scan job')
     parser.add_argument('--job-file', required=True)
     parser.add_argument('--scanner-script', required=True)
-    parser.add_argument('--analyzer-script', required=True)
+    parser.add_argument('--analyzer-script', required=False, default=None)
     parser.add_argument('--domain', required=True)
     parser.add_argument('--output-dir', required=True)
     parser.add_argument('--config-dir', required=True)
@@ -124,12 +126,13 @@ def main():
 
     scan_dir = find_scan_dir(output_dir, args.domain, before)
     analysis_file = None
-    if proc.returncode == 0 and scan_dir:
+    analyzer_path = Path(args.analyzer_script) if args.analyzer_script else None
+    if proc.returncode == 0 and scan_dir and analyzer_path and analyzer_path.exists():
         analysis_file = scan_dir / 'reports' / 'analysis.md'
         with open(log_file, 'a') as log:
             log.write(f"\n[{datetime.utcnow().isoformat()}Z] Running analyzer\n")
             subprocess.run(
-                [sys.executable, '-u', args.analyzer_script, str(scan_dir), '--export', str(analysis_file)],
+                [sys.executable, '-u', str(analyzer_path), str(scan_dir), '--export', str(analysis_file)],
                 stdout=log,
                 stderr=subprocess.STDOUT,
                 env=env,

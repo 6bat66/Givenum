@@ -257,13 +257,15 @@ export function getScan(scanId: string): ScanData | null {
 
   const nucleiRaw = readLines(path.join(scanDir, 'vulnerabilities', 'nuclei_results.txt'))
   const nuclei: NucleiFindings = { critical: [], high: [], medium: [], low: [], info: [] }
+  const severityRe = /\[(critical|high|medium|low|info)\]/i
   for (const line of nucleiRaw) {
-    const normalized = line.toLowerCase()
-    if (normalized.includes('critical')) nuclei.critical.push(line)
-    else if (normalized.includes('high')) nuclei.high.push(line)
-    else if (normalized.includes('medium')) nuclei.medium.push(line)
-    else if (normalized.includes('low')) nuclei.low.push(line)
-    else nuclei.info.push(line)
+    const match = line.match(severityRe)
+    if (match) {
+      const sev = match[1].toLowerCase() as keyof NucleiFindings
+      nuclei[sev].push(line)
+    } else {
+      nuclei.info.push(line)
+    }
   }
 
   const diffSummary = readJson<{ previous_scan?: string }>(path.join(scanDir, 'diff', 'diff_summary.json'))

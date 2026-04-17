@@ -4,7 +4,7 @@ import { spawn } from 'child_process'
 import { NextResponse } from 'next/server'
 import { createJob, getConfigDir, getJobFile, getProject, getProjectOutputDir, getResultsDir, getWorkspaceRoot, writeJob } from '@/lib/app-data'
 
-const DOMAIN_PATTERN = /^(?:\*\.)?(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}$/
+const DOMAIN_PATTERN = /^(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}$/
 
 function validateRuntimePath(filePath: string) {
   return fs.existsSync(filePath) && fs.statSync(filePath).isFile()
@@ -39,7 +39,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Workspace root is invalid' }, { status: 500 })
   }
 
-  for (const requiredFile of [runnerScript, scannerScript, analyzerScript]) {
+  for (const requiredFile of [runnerScript, scannerScript]) {
     if (!validateRuntimePath(requiredFile)) {
       return NextResponse.json({ error: `Missing runtime file: ${path.basename(requiredFile)}` }, { status: 500 })
     }
@@ -70,7 +70,7 @@ export async function POST(req: Request) {
     runnerScript,
     '--job-file', getJobFile(job.id),
     '--scanner-script', scannerScript,
-    '--analyzer-script', analyzerScript,
+    ...(fs.existsSync(analyzerScript) ? ['--analyzer-script', analyzerScript] : []),
     '--domain', domain,
     '--output-dir', outputBaseDir,
     '--config-dir', getConfigDir(),

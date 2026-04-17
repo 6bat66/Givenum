@@ -22,6 +22,39 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlparse, parse_qs
 import shutil
 import hashlib
+import socket
+import dns.resolver
+
+# Realistic browser User-Agent to avoid blocks on passive scans
+USER_AGENT = (
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+    'AppleWebKit/537.36 (KHTML, like Gecko) '
+    'Chrome/124.0.0.0 Safari/537.36'
+)
+
+
+def _api_request(url: str, headers: dict | None = None, timeout: int = 30,
+                 max_retries: int = 2, backoff: float = 3.0) -> requests.Response | None:
+    """HTTP GET with retry, backoff, and consistent User-Agent."""
+    hdrs = {'User-Agent': USER_AGENT}
+    if headers:
+        hdrs.update(headers)
+    for attempt in range(max_retries + 1):
+        try:
+            resp = requests.get(url, headers=hdrs, timeout=timeout)
+            if resp.status_code == 429:
+                wait = backoff * (2 ** attempt)
+                Logger.warning(f"Rate-limited (429) on {url}, waiting {wait:.0f}s")
+                time.sleep(wait)
+                continue
+            return resp
+        except requests.RequestException as e:
+            if attempt < max_retries:
+                time.sleep(backoff * (attempt + 1))
+            else:
+                raise
+    return None
+
 
 # Colors for output
 class Colors:
@@ -212,16 +245,28 @@ def run_logged(name: str, cmd: list, log_dir: Path, **kwargs) -> subprocess.Comp
         raise
 
 
+_STDOUT_LOG_LIMIT = 8_000  # chars — cap stdout in log files to avoid huge blobs
+
+
 def _track_captured(name: str, result: subprocess.CompletedProcess, t0: float, log_dir: Path):
-    """Record status and save stderr for a capture_output=True subprocess call."""
+    """Record status and save stderr+stdout for a capture_output=True subprocess call."""
     elapsed = round(time.time() - t0, 1)
     _tool_log[name] = {
         'status': 'ok' if result.returncode == 0 else 'fail',
         'rc': result.returncode,
         'elapsed': elapsed,
     }
+    parts: list[str] = []
     if result.stderr:
-        (log_dir / f"{name}.log").write_text(result.stderr)
+        parts.append(f"=== stderr ===\n{result.stderr}")
+    if result.stdout:
+        out = result.stdout
+        truncated = len(out) > _STDOUT_LOG_LIMIT
+        if truncated:
+            out = out[:_STDOUT_LOG_LIMIT]
+        parts.append(f"=== stdout{'  (truncated)' if truncated else ''} ===\n{out}")
+    if parts:
+        (log_dir / f"{name}.log").write_text('\n'.join(parts))
 
 
 class OutputManager:
@@ -279,12 +324,12 @@ class CertificateTransparency:
         
         try:
             url = f"https://crt.sh/?q=%.{self.domain}&output=json"
-            response = requests.get(url, timeout=30)
-            
-            if response.status_code == 200:
+            response = _api_request(url, timeout=30)
+
+            if response and response.status_code == 200:
                 data = response.json()
                 domains = set()
-                
+
                 for entry in data:
                     name = entry.get('name_value', '')
                     for candidate in name.split('\n'):
@@ -317,13 +362,13 @@ class CertificateTransparency:
             
             if api_key:
                 headers['Authorization'] = f'Bearer {api_key}'
-            
-            response = requests.get(url, headers=headers, timeout=30)
-            
-            if response.status_code == 200:
+
+            response = _api_request(url, headers=headers, timeout=30)
+
+            if response and response.status_code == 200:
                 data = response.json()
                 domains = set()
-                
+
                 for entry in data:
                     for name in entry.get('dns_names', []):
                         normalized = name.strip().rstrip('.')
@@ -371,9 +416,11 @@ class PassiveAPIs:
             pages = []
             page_count = 0
             while url and page_count < 10:
-                response = requests.get(url, headers=headers, timeout=30)
-                if response.status_code != 200:
-                    Logger.warning(f"VirusTotal returned status {response.status_code}")
+                if page_count > 0:
+                    time.sleep(15)  # VT free-tier: 4 req/min
+                response = _api_request(url, headers=headers, timeout=30)
+                if not response or response.status_code != 200:
+                    Logger.warning(f"VirusTotal returned status {response.status_code if response else 'no response'}")
                     break
 
                 data = response.json()
@@ -408,12 +455,12 @@ class PassiveAPIs:
         
         try:
             url = f"https://otx.alienvault.com/api/v1/indicators/domain/{self.domain}/passive_dns"
-            response = requests.get(url, timeout=30)
-            
-            if response.status_code == 200:
+            response = _api_request(url, timeout=30)
+
+            if response and response.status_code == 200:
                 data = response.json()
                 domains = set()
-                
+
                 for entry in data.get('passive_dns', []):
                     hostname = entry.get('hostname', '')
                     normalized = hostname.strip().rstrip('.')
@@ -444,12 +491,12 @@ class PassiveAPIs:
         try:
             url = f"https://api.securitytrails.com/v1/domain/{self.domain}/subdomains"
             headers = {'APIKEY': api_key}
-            response = requests.get(url, headers=headers, timeout=30)
-            
-            if response.status_code == 200:
+            response = _api_request(url, headers=headers, timeout=30)
+
+            if response and response.status_code == 200:
                 data = response.json()
                 domains = set()
-                
+
                 for subdomain in data.get('subdomains', []):
                     full_domain = f"{subdomain}.{self.domain}"
                     domains.add(full_domain)
@@ -936,6 +983,8 @@ class HTTPProber:
                 '-cname',
                 '-content-length',
                 '-web-server',
+                '-rate-limit', '100',
+                '-retries', '2',
                 '-json',
                 '-o', str(json_file)
             ]
@@ -1173,6 +1222,8 @@ class URLCollector:
                 return set()
 
             all_urls = set()
+            katana_timeouts = 0
+            katana_failures = 0
             for idx, host in enumerate(hosts[:50], start=1):
                 try:
                     result = subprocess.run(
@@ -1183,18 +1234,24 @@ class URLCollector:
                         timeout=90
                     )
                     self._append_log(log_file, f"{host} (rc={result.returncode})", result.stderr)
+                    if result.returncode != 0:
+                        katana_failures += 1
                     batch_urls = set(line.strip() for line in result.stdout.split('\n') if line.strip())
                     all_urls.update(batch_urls)
                     if idx == 1 or idx % 10 == 0 or idx == len(hosts):
                         Logger.info(f"katana progress: {idx}/{min(len(hosts), 50)} hosts, {len(all_urls)} URLs")
                 except subprocess.TimeoutExpired:
+                    katana_timeouts += 1
                     self._append_log(log_file, f"{host} (timeout)", '')
                     Logger.warning(f"katana timeout on {host}")
                 except Exception as e:
+                    katana_failures += 1
                     self._append_log(log_file, f"{host} (error)", str(e))
 
-            _track_captured('katana', type('obj', (object,), {'returncode': 0, 'stderr': ''})(), _t0, self.output_mgr.dirs['logs'])
-            _tool_log['katana'] = {'status': 'ok', 'rc': 0, 'elapsed': round(time.time() - _t0, 1), 'urls': len(all_urls)}
+            total = min(len(hosts), 50)
+            ok_count = total - katana_timeouts - katana_failures
+            status = 'ok' if ok_count > total // 2 else ('partial' if ok_count > 0 else 'fail')
+            _tool_log['katana'] = {'status': status, 'rc': 0 if status == 'ok' else 1, 'elapsed': round(time.time() - _t0, 1), 'urls': len(all_urls), 'timeouts': katana_timeouts, 'failures': katana_failures}
 
             with open(output_file, 'w') as f:
                 f.write('\n'.join(sorted(all_urls)) + '\n')
@@ -1572,9 +1629,13 @@ class JSAnalyzer:
         output_file = self.output_mgr.get_path('js', 'subjs.txt')
         
         try:
+            # subjs -i <file> is silently broken in v1.0.1; pipe via stdin instead
+            with open(input_file, 'r') as fh:
+                stdin_data = fh.read()
             _t0 = time.time()
             result = subprocess.run(
-                ['subjs', '-i', str(input_file)],
+                ['subjs'],
+                input=stdin_data,
                 capture_output=True,
                 text=True,
                 timeout=300
@@ -1607,17 +1668,18 @@ class JSAnalyzer:
             
             all_findings = set()
             _t0 = time.time()
+            last_result = None
             for url in urls[:100]:  # Limit to prevent excessive scanning
-                result = subprocess.run(
+                last_result = subprocess.run(
                     ['jsubfinder', '-u', url, '-silent'],
                     capture_output=True,
                     text=True,
                     timeout=30
                 )
-                findings = set(line.strip() for line in result.stdout.split('\n') if line.strip())
+                findings = set(line.strip() for line in last_result.stdout.split('\n') if line.strip())
                 all_findings.update(findings)
-            if urls:
-                _track_captured('jsubfinder', result, _t0, self.output_mgr.dirs['logs'])
+            if urls and last_result is not None:
+                _track_captured('jsubfinder', last_result, _t0, self.output_mgr.dirs['logs'])
 
             with open(output_file, 'w') as f:
                 f.write('\n'.join(sorted(all_findings)) + '\n')
@@ -1691,7 +1753,7 @@ class JSAnalyzer:
         failures = 0
 
         session = requests.Session()
-        headers = {'User-Agent': 'GivEnum/1.0 (+https://github.com/6bat66/Givenum)'}
+        headers = {'User-Agent': USER_AGENT}
 
         for url in sorted(js_urls)[:limit]:
             try:
@@ -1968,6 +2030,112 @@ class VulnScanner:
             Logger.error(f"Error in dalfox: {e}")
 
 
+class ReconEnricher:
+    """Post-enumeration enrichment: zone transfers, CORS misconfig, WAF detection."""
+
+    def __init__(self, domain: str, output_mgr: OutputManager):
+        self.domain = domain
+        self.output_mgr = output_mgr
+
+    def check_zone_transfer(self) -> list[str]:
+        """Attempt AXFR zone transfer on all NS servers for the domain."""
+        Logger.info(f"Checking zone transfer for {self.domain}...")
+        results = []
+        try:
+            ns_answers = dns.resolver.resolve(self.domain, 'NS')
+            for ns in ns_answers:
+                ns_host = str(ns).rstrip('.')
+                try:
+                    xfr = dns.query.xfr(ns_host, self.domain, timeout=10)
+                    records = []
+                    for msg in xfr:
+                        for rrset in msg.answer:
+                            records.append(str(rrset))
+                    if records:
+                        Logger.warning(f"Zone transfer OPEN on {ns_host}!")
+                        results.extend(records)
+                except Exception:
+                    pass  # Transfer refused — expected
+        except Exception as e:
+            Logger.warning(f"Could not resolve NS for {self.domain}: {e}")
+
+        if results:
+            out = self.output_mgr.get_path('dns', 'zone_transfer.txt')
+            with open(out, 'w') as f:
+                f.write('\n'.join(results) + '\n')
+        return results
+
+    def detect_cors_misconfig(self, alive_file: Path, sample: int = 30):
+        """Check for CORS misconfigurations on a sample of live hosts."""
+        Logger.info("Checking CORS misconfigurations...")
+        if not alive_file.exists():
+            return
+        with open(alive_file) as f:
+            hosts = [l.strip() for l in f if l.strip()][:sample]
+
+        findings = []
+        for host in hosts:
+            try:
+                resp = requests.get(
+                    host,
+                    headers={'User-Agent': USER_AGENT, 'Origin': 'https://evil.com'},
+                    timeout=8,
+                    allow_redirects=False,
+                )
+                acao = resp.headers.get('Access-Control-Allow-Origin', '')
+                if acao == 'https://evil.com' or acao == '*':
+                    findings.append(f"{host} → ACAO: {acao}")
+            except Exception:
+                pass
+
+        if findings:
+            Logger.warning(f"CORS misconfigs found: {len(findings)}")
+            out = self.output_mgr.get_path('vulnerabilities', 'cors_misconfig.txt')
+            with open(out, 'w') as f:
+                f.write('\n'.join(findings) + '\n')
+        else:
+            Logger.success("No CORS misconfigurations detected")
+
+    def detect_waf(self, alive_file: Path, sample: int = 10):
+        """Detect WAF presence via server headers on a sample of hosts."""
+        Logger.info("Detecting WAF presence...")
+        if not alive_file.exists():
+            return
+        with open(alive_file) as f:
+            hosts = [l.strip() for l in f if l.strip()][:sample]
+
+        waf_signatures = {
+            'cloudflare': 'Cloudflare',
+            'akamai': 'Akamai',
+            'sucuri': 'Sucuri',
+            'imperva': 'Imperva',
+            'barracuda': 'Barracuda',
+            'f5 big-ip': 'F5 BIG-IP',
+            'aws': 'AWS WAF',
+            'ddos-guard': 'DDoS-Guard',
+        }
+
+        findings = []
+        for host in hosts:
+            try:
+                resp = requests.head(host, headers={'User-Agent': USER_AGENT}, timeout=8, allow_redirects=True)
+                server = resp.headers.get('Server', '').lower()
+                via = resp.headers.get('Via', '').lower()
+                combined = f"{server} {via} {' '.join(str(v) for v in resp.headers.values()).lower()}"
+                for sig, name in waf_signatures.items():
+                    if sig in combined:
+                        findings.append(f"{host} → {name}")
+                        break
+            except Exception:
+                pass
+
+        if findings:
+            Logger.info(f"WAF detected on {len(findings)} hosts")
+            out = self.output_mgr.get_path('http', 'waf_detection.txt')
+            with open(out, 'w') as f:
+                f.write('\n'.join(findings) + '\n')
+
+
 class CloudDetector:
     """Detect cloud services"""
     
@@ -2163,26 +2331,30 @@ class TakeoverChecker:
         output_file = self.output_mgr.get_path('takeover', 'subjack_results.txt')
 
         log_dir = self.output_mgr.dirs['logs']
+        # Try without hardcoded fingerprints first (works on most installs)
         try:
             run_logged(
                 'subjack',
-                ['subjack', '-w', str(input_file), '-o', str(output_file),
-                 '-ssl', '-timeout', '30', '-c',
-                 str(Path.home() / 'go' / 'pkg' / 'mod' / 'github.com' / 'haccer' / 'subjack@v0.0.0-20201112041112-049c369c6946' / 'fingerprints.json')],
+                ['subjack', '-w', str(input_file), '-o', str(output_file), '-ssl', '-timeout', '30'],
                 log_dir,
                 timeout=600,
             )
-        except FileNotFoundError:
-            # Try without fingerprints path (newer versions bundle it)
-            try:
-                run_logged(
-                    'subjack',
-                    ['subjack', '-w', str(input_file), '-o', str(output_file), '-ssl', '-timeout', '30'],
-                    log_dir,
-                    timeout=600,
-                )
-            except Exception as e:
-                Logger.error(f"Error in subjack: {e}")
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            # Fallback: try with explicit fingerprints path
+            fp_path = Path.home() / 'go' / 'pkg' / 'mod' / 'github.com' / 'haccer' / 'subjack@v0.0.0-20201112041112-049c369c6946' / 'fingerprints.json'
+            if fp_path.exists():
+                try:
+                    run_logged(
+                        'subjack',
+                        ['subjack', '-w', str(input_file), '-o', str(output_file), '-ssl', '-timeout', '30', '-c', str(fp_path)],
+                        log_dir,
+                        timeout=600,
+                    )
+                except Exception as e:
+                    Logger.error(f"Error in subjack: {e}")
+                    return
+            else:
+                Logger.warning("subjack fingerprints.json not found, skipping")
                 return
         except Exception as e:
             Logger.error(f"Error in subjack: {e}")
@@ -2562,6 +2734,7 @@ class GivEnum:
         self.git_dumper = GitDumper(self.output_mgr)
         self.vuln_scanner = VulnScanner(self.output_mgr)
         self.cloud_detector = CloudDetector(self.output_mgr)
+        self.recon_enricher = ReconEnricher(domain, self.output_mgr)
         self.param_discovery = ParameterDiscovery(self.output_mgr)
         self.takeover_checker = TakeoverChecker(self.output_mgr)
         self.notifier = NotificationManager(self.api_config, enabled=notify)
@@ -2588,6 +2761,9 @@ class GivEnum:
 
         # 1. Subdomain enumeration (passive sources)
         subs_file = self.subdomain_enum.run_all()
+
+        # 1a. Zone transfer check
+        self.recon_enricher.check_zone_transfer()
 
         # 1b. DNS brute-force (active only)
         if active:
@@ -2646,6 +2822,10 @@ class GivEnum:
             return
 
         self.http_prober.check_urls_with_hakcheckurl(alive_file)
+
+        # 5b. CORS misconfig + WAF detection
+        self.recon_enricher.detect_cors_misconfig(alive_file)
+        self.recon_enricher.detect_waf(alive_file)
 
         # 6. Screenshots
         if not skip_screenshots:

@@ -293,6 +293,30 @@ export function getJobFile(jobId: string): string {
   return path.join(getJobsDir(), `${jobId}.json`)
 }
 
+export function cleanupOrphanedJobs(): number {
+  ensureAppLayout()
+  let fixed = 0
+  try {
+    for (const entry of fs.readdirSync(getJobsDir()).filter((e) => e.endsWith('.json'))) {
+      const filePath = path.join(getJobsDir(), entry)
+      const job = readJson<Record<string, unknown>>(filePath, {})
+      if (!job.status || job.status !== 'running') continue
+      const pid = job.pid as number | undefined
+      if (pid) {
+        try { process.kill(pid, 0) ; continue } catch { /* process gone */ }
+      }
+      // Job says running but process is dead — mark as failed
+      job.status = 'failed'
+      job.endedAt = new Date().toISOString()
+      job.returnCode = -9
+      job.pid = null
+      writeJson(filePath, job)
+      fixed++
+    }
+  } catch { /* ignore */ }
+  return fixed
+}
+
 export function deleteJob(jobId: string): boolean {
   const filePath = path.join(getJobsDir(), `${jobId}.json`)
   try {

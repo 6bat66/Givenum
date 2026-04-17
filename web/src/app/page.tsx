@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import DashboardControls from '@/components/DashboardControls'
 import { DeleteJobButton, DeleteProjectButton, DeleteScanButton, StopJobButton } from '@/components/ManageActions'
-import { listJobs, listProjects } from '@/lib/app-data'
+import { cleanupOrphanedJobs, listJobs, listProjects } from '@/lib/app-data'
 import { listScans } from '@/lib/results'
 import type { ProjectMeta, ScanJob, ScanMeta } from '@/lib/types'
 
@@ -150,6 +150,8 @@ function JobCard({ job }: { job: ScanJob }) {
 }
 
 export default async function Home() {
+  cleanupOrphanedJobs()
+
   let scans: ScanMeta[] = []
   let projects: ProjectMeta[] = []
   let jobs: ScanJob[] = []

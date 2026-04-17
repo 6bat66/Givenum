@@ -27,15 +27,30 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const url = new URL(req.url)
   const format = url.searchParams.get('format')
   const tail = Number(url.searchParams.get('tail') || '0')
+  const offset = Number(url.searchParams.get('offset') || '0')
   const stat = fs.statSync(job.logFile)
-  const rawContent = fs.readFileSync(job.logFile, 'utf-8')
+  const fileSize = stat.size
+
+  // Incremental fetch: only read bytes after offset
+  let rawContent: string
+  if (offset > 0 && offset < fileSize) {
+    const buf = Buffer.alloc(fileSize - offset)
+    const fd = fs.openSync(job.logFile, 'r')
+    fs.readSync(fd, buf, 0, buf.length, offset)
+    fs.closeSync(fd)
+    rawContent = buf.toString('utf-8')
+  } else if (offset >= fileSize) {
+    rawContent = ''
+  } else {
+    rawContent = fs.readFileSync(job.logFile, 'utf-8')
+  }
   const { content, truncated } = getTailContent(rawContent, Number.isFinite(tail) ? tail : 0)
 
   if (format === 'json') {
     return NextResponse.json({
       content,
       truncated,
-      size: rawContent.length,
+      size: fileSize,
       status: job.status,
       updatedAt: stat.mtime.toISOString(),
     }, {

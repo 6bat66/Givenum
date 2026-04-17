@@ -78,7 +78,11 @@ export default function ApiSettingsForm({ initialKeys }: Props) {
 
       {status && (
         <div className="rounded-lg px-3 py-2 text-sm"
-          style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>
+          style={{
+            background: status === 'Configuração salva' ? '#052e16' : '#450a0a',
+            border: `1px solid ${status === 'Configuração salva' ? '#14532d' : '#7f1d1d'}`,
+            color: status === 'Configuração salva' ? '#86efac' : '#fca5a5',
+          }}>
           {status}
         </div>
       )}

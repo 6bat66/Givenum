@@ -529,7 +529,7 @@ function ToolsTab({ data }: { data: ScanData }) {
     try {
       const res = await fetch(`/api/scan/${data.id}/logs/${tool}`)
       const text = await res.text()
-      setLogContent(text || '(empty — tool produced no stderr)')
+      setLogContent(text || '(no output captured for this tool)')
     } catch {
       setLogContent('(failed to load log)')
     } finally {
@@ -624,7 +624,7 @@ function ToolsTab({ data }: { data: ScanData }) {
             <div className="flex items-center justify-between px-5 py-3 border-b" style={{ borderColor: 'var(--border)' }}>
               <div>
                 <span className="font-mono font-semibold text-sm" style={{ color: 'var(--cyan)' }}>{selectedTool}</span>
-                <span className="text-xs ml-3" style={{ color: 'var(--text-muted)' }}>stderr</span>
+                <span className="text-xs ml-3" style={{ color: 'var(--text-muted)' }}>output log</span>
               </div>
               <button
                 onClick={() => setSelectedTool(null)}

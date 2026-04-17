@@ -118,12 +118,23 @@ RUN nuclei -update-templates 2>/dev/null || true
 COPY web/package.json web/package-lock.json /app/web/
 RUN npm --prefix /app/web ci
 
-COPY GivEnum.py analyze_results.py scan_runner.py install_tools.sh batch_enum.sh docker-entrypoint.sh /app/
+COPY GivEnum.py scan_runner.py install_tools.sh batch_enum.sh docker-entrypoint.sh /app/
 COPY web /app/web
 
+# postcss.config.mjs must exist for Tailwind to process @tailwind directives.
+# Build is run from /app/web so Next.js resolves postcss config relative to CWD.
+# WEB_BUILD_REV bumps the cache so `docker compose build` always re-runs npm build.
+ARG WEB_BUILD_REV=1
+RUN printf 'const config={plugins:{tailwindcss:{},autoprefixer:{}}};export default config;\n' \
+    > /app/web/postcss.config.mjs
+
 RUN chmod +x /app/install_tools.sh /app/batch_enum.sh /app/scan_runner.py /app/docker-entrypoint.sh && \
-    npm --prefix /app/web run build && \
-    rm -rf /app/web-runtime && \
+    echo "=== web build rev: ${WEB_BUILD_REV} ===" && \
+    echo "=== postcss.config.mjs ===" && cat /app/web/postcss.config.mjs && \
+    echo "=== tailwindcss present: $(ls /app/web/node_modules/tailwindcss/package.json 2>/dev/null && echo YES || echo NO) ===" && \
+    cd /app/web && npm run build && \
+    echo "=== CSS output sample ===" && head -c 80 /app/web/.next/static/css/*.css && echo "" && \
+    cd /app && rm -rf /app/web-runtime && \
     mkdir -p /app/web-runtime/.next && \
     cp -R /app/web/.next/standalone/. /app/web-runtime/ && \
     cp -R /app/web/.next/static /app/web-runtime/.next/static && \

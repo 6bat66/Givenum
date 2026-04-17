@@ -222,10 +222,17 @@ function renderAnsiToHtml(content: string) {
   return html
 }
 
-async function fetchJobState(jobId: string): Promise<FetchState> {
+async function fetchJobState(jobId: string, offset?: number): Promise<FetchState & { size: number }> {
+  const logParams = new URLSearchParams({ format: 'json' })
+  if (offset !== undefined && offset > 0) {
+    logParams.set('offset', String(offset))
+  } else {
+    logParams.set('tail', '400000')
+  }
+
   const [jobResponse, logResponse] = await Promise.all([
     fetch(`/api/jobs/${jobId}`, { cache: 'no-store' }),
-    fetch(`/api/jobs/${jobId}/log?format=json&tail=400000`, { cache: 'no-store' }),
+    fetch(`/api/jobs/${jobId}/log?${logParams}`, { cache: 'no-store' }),
   ])
 
   const nextJob = await jobResponse.json()
@@ -243,6 +250,7 @@ async function fetchJobState(jobId: string): Promise<FetchState> {
     log: String(nextLog.content || ''),
     truncated: Boolean(nextLog.truncated),
     updatedAt: typeof nextLog.updatedAt === 'string' ? nextLog.updatedAt : null,
+    size: typeof nextLog.size === 'number' ? nextLog.size : 0,
   }
 }
 
@@ -261,6 +269,7 @@ export default function JobLogViewer({ initialJob, initialLog }: Props) {
   const [updatedAt, setUpdatedAt] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
+  const logSizeRef = useRef(0)
 
   const renderedLog = useMemo(() => renderAnsiToHtml(log), [log])
   const isFinished = job.status === 'completed' || job.status === 'failed' || job.status === 'stopped'
@@ -280,6 +289,7 @@ export default function JobLogViewer({ initialJob, initialLog }: Props) {
       const next = await fetchJobState(job.id)
       setJob(next.job)
       setLog(next.log)
+      logSizeRef.current = next.size
       setTruncated(next.truncated)
       setUpdatedAt(next.updatedAt)
     } catch (err) {
@@ -315,10 +325,16 @@ export default function JobLogViewer({ initialJob, initialLog }: Props) {
 
     const poll = async () => {
       try {
-        const next = await fetchJobState(job.id)
+        const currentOffset = logSizeRef.current
+        const next = await fetchJobState(job.id, currentOffset)
         if (cancelled) return
         setJob(next.job)
-        setLog(next.log)
+        if (currentOffset > 0 && next.log) {
+          setLog((prev) => prev + next.log)
+        } else if (next.log) {
+          setLog(next.log)
+        }
+        logSizeRef.current = next.size
         setTruncated(next.truncated)
         setUpdatedAt(next.updatedAt)
       } catch (err) {
