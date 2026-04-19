@@ -1446,12 +1446,63 @@ class URLCollector:
         meg_dir.mkdir(exist_ok=True)
         log_file = self.output_mgr.get_path('logs', 'meg.log')
 
-        # Common paths worth probing
+        # Paths probed on every host — biased towards findings that appear in real reports
         interesting_paths = [
-            '/robots.txt', '/sitemap.xml', '/.well-known/security.txt',
+            # Discovery & metadata
+            '/robots.txt', '/sitemap.xml', '/sitemap_index.xml',
+            '/.well-known/security.txt', '/security.txt',
             '/crossdomain.xml', '/clientaccesspolicy.xml',
-            '/api', '/api/v1', '/api/v2', '/swagger.json', '/openapi.json',
-            '/.env', '/config.json', '/package.json',
+            '/humans.txt', '/ads.txt', '/app-ads.txt',
+            # API surface
+            '/api', '/api/', '/api/v1', '/api/v2', '/api/v3',
+            '/v1', '/v2', '/v3', '/rest', '/rest/v1',
+            '/swagger.json', '/swagger.yaml', '/openapi.json', '/openapi.yaml',
+            '/swagger-ui.html', '/swagger-ui/', '/api-docs', '/api/docs',
+            '/redoc', '/api/swagger', '/docs',
+            '/graphql', '/graphiql', '/api/graphql', '/graphql/console',
+            # Config / secrets
+            '/.env', '/.env.production', '/.env.local', '/.env.backup',
+            '/.env.example', '/.env.staging', '/.env.test',
+            '/config.json', '/config.php', '/configuration.php',
+            '/wp-config.php', '/wp-config.php.bak', '/wp-config.php.old',
+            '/config/database.yml', '/config/secrets.yml', '/config/settings.yml',
+            '/settings.py', '/local_settings.py',
+            '/app/config/parameters.yml', '/app/config/parameters.yml.dist',
+            '/package.json', '/composer.json', '/composer.lock',
+            '/Gemfile', '/requirements.txt', '/Pipfile',
+            # Admin panels
+            '/admin', '/admin/', '/admin.php', '/admin/login',
+            '/administrator', '/administrator/', '/administrator/index.php',
+            '/wp-admin/', '/wp-login.php',
+            '/phpmyadmin', '/phpmyadmin/', '/pma', '/pma/',
+            '/adminer.php', '/adminer',
+            '/_admin', '/cpanel', '/panel', '/backend',
+            '/management', '/manage', '/dashboard/login',
+            # Sensitive / debug files
+            '/phpinfo.php', '/info.php', '/test.php', '/phptest.php',
+            '/server-status', '/server-info', '/nginx_status',
+            '/web.config', '/.htaccess', '/.htpasswd',
+            '/WEB-INF/web.xml', '/WEB-INF/applicationContext.xml',
+            '/.DS_Store',
+            # VCS exposure
+            '/.git/config', '/.git/HEAD', '/.gitignore',
+            '/.svn/entries', '/.hg/hgrc',
+            # Backup / archive
+            '/backup.zip', '/backup.tar.gz', '/backup.sql',
+            '/dump.sql', '/db.sql', '/database.sql',
+            '/site.zip', '/www.zip', '/html.zip',
+            # Debug / monitoring endpoints
+            '/debug', '/console',
+            '/_profiler', '/telescope', '/horizon',
+            '/health', '/healthz', '/ping', '/status',
+            '/metrics', '/actuator', '/actuator/health',
+            '/actuator/env', '/actuator/beans', '/actuator/mappings',
+            # Auth
+            '/login', '/signin', '/auth', '/auth/login',
+            '/user/login', '/account/login', '/sso/login',
+            # Misc
+            '/upload', '/uploads', '/files', '/static/files',
+            '/favicon.ico',
         ]
 
         paths_file = self.output_mgr.get_path('urls', 'meg_paths.txt')
@@ -1485,6 +1536,60 @@ class URLCollector:
         except Exception as e:
             Logger.error(f"Error in meg: {e}")
             return set()
+
+    def parse_robots_sitemap(self, alive_file: Path) -> Set[str]:
+        """Parse robots.txt Disallow paths and sitemap.xml URLs from live hosts."""
+        if not alive_file.exists():
+            return set()
+
+        with open(alive_file) as f:
+            hosts = [l.strip() for l in f if l.strip()]
+
+        discovered: Set[str] = set()
+        robots_paths: Set[str] = set()
+        sitemap_urls: Set[str] = set()
+        session = requests.Session()
+        session.headers['User-Agent'] = USER_AGENT
+
+        for host in hosts:
+            # robots.txt
+            try:
+                r = session.get(f"{host.rstrip('/')}/robots.txt", timeout=8, allow_redirects=True)
+                if r.status_code == 200 and 'text/plain' in r.headers.get('Content-Type', ''):
+                    for line in r.text.splitlines():
+                        line = line.strip()
+                        if line.lower().startswith(('disallow:', 'allow:')):
+                            path_val = line.split(':', 1)[1].strip().split('?')[0]
+                            if path_val and path_val != '/':
+                                robots_paths.add(path_val)
+                                discovered.add(f"{host.rstrip('/')}{path_val}")
+                        elif line.lower().startswith('sitemap:'):
+                            sm_url = line.split(':', 1)[1].strip()
+                            if sm_url:
+                                sitemap_urls.add(sm_url)
+            except Exception:
+                pass
+
+            # sitemap.xml
+            for sm_url in list(sitemap_urls) + [f"{host.rstrip('/')}/sitemap.xml"]:
+                try:
+                    r = session.get(sm_url, timeout=8, allow_redirects=True)
+                    if r.status_code == 200:
+                        for url_match in re.findall(r'<loc>\s*(https?://[^<\s]+)\s*</loc>', r.text):
+                            discovered.add(url_match.strip())
+                except Exception:
+                    pass
+
+        # Persist discovered paths
+        if robots_paths:
+            out = self.output_mgr.get_path('urls', 'robots_paths.txt')
+            with open(out, 'w') as f:
+                f.write('\n'.join(sorted(robots_paths)) + '\n')
+
+        if discovered:
+            Logger.info(f"robots.txt/sitemap: {len(discovered)} paths/URLs discovered")
+
+        return discovered
 
     def analyze_with_freq(self, input_file: Path):
         """Score URLs/words by character frequency to surface anomalies"""
@@ -2135,6 +2240,183 @@ class ReconEnricher:
             with open(out, 'w') as f:
                 f.write('\n'.join(findings) + '\n')
 
+    # ── Email Security ────────────────────────────────────────────────────────
+
+    def check_email_security(self) -> list[str]:
+        """Check SPF, DMARC and common DKIM selectors for email spoofing vectors."""
+        Logger.info(f"Checking email security (SPF/DMARC/DKIM) for {self.domain}...")
+        issues: list[str] = []
+
+        # ── SPF ──────────────────────────────────────────────────────────────
+        try:
+            spf_records: list[str] = []
+            for rdata in dns.resolver.resolve(self.domain, 'TXT'):
+                txt = str(rdata).strip('"')
+                if txt.startswith('v=spf1'):
+                    spf_records.append(txt)
+
+            if not spf_records:
+                issues.append(f"[high] SPF missing → anyone can spoof @{self.domain}")
+            elif len(spf_records) > 1:
+                issues.append(f"[medium] Multiple SPF records (RFC-invalid, mail may be rejected)")
+            else:
+                spf = spf_records[0]
+                if '+all' in spf:
+                    issues.append(f"[high] SPF uses '+all' → any server is authorised to send as {self.domain}")
+                elif '?all' in spf:
+                    issues.append(f"[medium] SPF uses '?all' (neutral) → policy is not enforced")
+                elif '-all' not in spf and '~all' not in spf:
+                    issues.append(f"[low] SPF has no 'all' mechanism → incomplete policy")
+        except dns.resolver.NXDOMAIN:
+            issues.append(f"[high] SPF missing (NXDOMAIN for TXT on {self.domain})")
+        except Exception:
+            pass
+
+        # ── DMARC ────────────────────────────────────────────────────────────
+        try:
+            dmarc_records: list[str] = []
+            for rdata in dns.resolver.resolve(f'_dmarc.{self.domain}', 'TXT'):
+                txt = str(rdata).strip('"')
+                if txt.startswith('v=DMARC1'):
+                    dmarc_records.append(txt)
+
+            if not dmarc_records:
+                issues.append(f"[high] DMARC missing → no enforcement for email spoofing")
+            else:
+                dmarc = dmarc_records[0]
+                if 'p=none' in dmarc:
+                    issues.append(f"[medium] DMARC policy p=none → monitoring only, spoofed emails still delivered")
+                if 'rua=' not in dmarc and 'ruf=' not in dmarc:
+                    issues.append(f"[low] DMARC has no reporting address (rua=/ruf=) → no spoofing visibility")
+        except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
+            issues.append(f"[high] DMARC missing (_dmarc.{self.domain} does not exist)")
+        except Exception:
+            pass
+
+        # ── DKIM selectors ───────────────────────────────────────────────────
+        common_selectors = [
+            'default', 'google', 'mail', 'dkim', 'k1', 'k2',
+            'selector1', 'selector2', 'email', 's1', 's2',
+            'mandrill', 'sendgrid', 'mailchimp', 'amazonses',
+        ]
+        found_selectors: list[str] = []
+        for sel in common_selectors:
+            try:
+                dns.resolver.resolve(f'{sel}._domainkey.{self.domain}', 'TXT')
+                found_selectors.append(sel)
+            except Exception:
+                pass
+
+        if not found_selectors:
+            issues.append(f"[info] No common DKIM selectors found (checked: {', '.join(common_selectors[:6])}...)")
+
+        # ── Save ─────────────────────────────────────────────────────────────
+        lines: list[str] = [
+            f"=== Email Security: {self.domain} ===",
+            f"DKIM selectors found: {', '.join(found_selectors) or 'none'}",
+            "",
+        ]
+        if issues:
+            Logger.warning(f"Email security: {len(issues)} issue(s) found")
+            lines += [f"  {i}" for i in issues]
+            out = self.output_mgr.get_path('vulnerabilities', 'email_security.txt')
+            with open(out, 'w') as f:
+                f.write('\n'.join(lines) + '\n')
+        else:
+            Logger.success("Email security: SPF/DMARC/DKIM look good")
+
+        return issues
+
+    # ── HTTP Security Headers ─────────────────────────────────────────────────
+
+    def check_security_headers(self, alive_file: Path, sample: int = 30) -> list[str]:
+        """Audit HTTP security headers and cookie flags on live hosts."""
+        Logger.info("Checking HTTP security headers...")
+        if not alive_file.exists():
+            return []
+
+        with open(alive_file) as f:
+            hosts = [l.strip() for l in f if l.strip()][:sample]
+
+        # (header, friendly-name, severity)
+        REQUIRED_HEADERS = [
+            ('Strict-Transport-Security',  'HSTS',                   'high'),
+            ('Content-Security-Policy',    'Content-Security-Policy','medium'),
+            ('X-Frame-Options',            'X-Frame-Options',        'medium'),
+            ('X-Content-Type-Options',     'X-Content-Type-Options', 'low'),
+            ('Referrer-Policy',            'Referrer-Policy',        'low'),
+            ('Permissions-Policy',         'Permissions-Policy',     'low'),
+        ]
+
+        all_findings: list[str] = []
+        session = requests.Session()
+        session.headers['User-Agent'] = USER_AGENT
+
+        for host in hosts:
+            try:
+                resp = session.get(host, timeout=10, allow_redirects=True)
+                resp_headers_lower = {k.lower() for k in resp.headers}
+
+                # Missing headers
+                for header, name, severity in REQUIRED_HEADERS:
+                    # HSTS only matters on HTTPS
+                    if header == 'Strict-Transport-Security' and not host.startswith('https://'):
+                        continue
+                    if header.lower() not in resp_headers_lower:
+                        all_findings.append(f"[{severity}] {host} → Missing {header}")
+
+                # HSTS max-age too short
+                hsts_val = resp.headers.get('Strict-Transport-Security', '')
+                if hsts_val:
+                    m = re.search(r'max-age=(\d+)', hsts_val)
+                    if m and int(m.group(1)) < 31_536_000:
+                        all_findings.append(
+                            f"[low] {host} → HSTS max-age {m.group(1)}s < 1 year (recommended ≥31536000)"
+                        )
+
+                # Version disclosure via Server / X-Powered-By
+                server_hdr = resp.headers.get('Server', '')
+                if server_hdr and any(c.isdigit() for c in server_hdr):
+                    all_findings.append(f"[low] {host} → Server header exposes version: {server_hdr}")
+                xpb = resp.headers.get('X-Powered-By', '')
+                if xpb:
+                    all_findings.append(f"[low] {host} → X-Powered-By exposes stack: {xpb}")
+
+                # Cookie flags (urllib3 gives us all Set-Cookie lines)
+                try:
+                    cookie_lines = resp.raw.headers.getlist('set-cookie')
+                except Exception:
+                    raw_ck = resp.headers.get('Set-Cookie', '')
+                    cookie_lines = [raw_ck] if raw_ck else []
+
+                for cookie_line in cookie_lines:
+                    name_part = cookie_line.split('=')[0].strip()
+                    flags_lower = cookie_line.lower()
+                    missing_flags: list[str] = []
+                    if host.startswith('https://') and 'secure' not in flags_lower:
+                        missing_flags.append('Secure')
+                    if 'httponly' not in flags_lower:
+                        missing_flags.append('HttpOnly')
+                    if 'samesite' not in flags_lower:
+                        missing_flags.append('SameSite')
+                    if missing_flags:
+                        all_findings.append(
+                            f"[low] {host} → Cookie '{name_part}' missing flags: {', '.join(missing_flags)}"
+                        )
+
+            except Exception:
+                pass
+
+        if all_findings:
+            Logger.warning(f"Security headers: {len(all_findings)} issue(s) across {len(hosts)} hosts")
+            out = self.output_mgr.get_path('vulnerabilities', 'security_headers.txt')
+            with open(out, 'w') as f:
+                f.write('\n'.join(all_findings) + '\n')
+        else:
+            Logger.success("Security headers: no issues found")
+
+        return all_findings
+
 
 class CloudDetector:
     """Detect cloud services"""
@@ -2226,46 +2508,104 @@ class ParameterDiscovery:
         except Exception as e:
             Logger.error(f"Error in Arjun: {e}")
     
+    # Parameter vulnerability categories — used for tagging and prioritised output
+    _PARAM_CATEGORIES: dict[str, list[str]] = {
+        'open_redirect': [
+            'redirect', 'return', 'next', 'callback', 'continue', 'goto',
+            'dest', 'destination', 'target', 'redir', 'url', 'link', 'returnurl',
+            'returnto', 'backurl', 'forward', 'location',
+        ],
+        'ssrf': [
+            'url', 'uri', 'endpoint', 'server', 'host', 'site', 'webhook',
+            'fetch', 'load', 'proxy', 'remote', 'src', 'source', 'api',
+            'feed', 'import', 'connect',
+        ],
+        'lfi_rfi': [
+            'file', 'filename', 'path', 'dir', 'folder', 'document', 'root',
+            'include', 'page', 'template', 'view', 'layout', 'load',
+            'config', 'resource', 'module', 'action',
+        ],
+        'sqli': [
+            'id', 'uid', 'user_id', 'item', 'order', 'sort', 'category',
+            'product', 'search', 'query', 'q', 'filter', 'limit', 'offset',
+            'page', 'num', 'start', 'from', 'to', 'by',
+        ],
+        'auth_tokens': [
+            'token', 'key', 'apikey', 'api_key', 'access_token', 'auth',
+            'secret', 'password', 'passwd', 'pass', 'pwd', 'hash',
+            'session', 'csrf', 'nonce', 'signature', 'sig',
+        ],
+        'user_data': [
+            'user', 'username', 'email', 'name', 'login', 'account',
+            'admin', 'role', 'group', 'uid', 'userid', 'profile',
+        ],
+        'debug': [
+            'debug', 'test', 'dev', 'beta', 'staging', 'verbose',
+            'trace', 'log', 'mode',
+        ],
+    }
+
     def analyze_parameters(self, url_file: Path):
-        """Analyze URL parameters"""
+        """Analyze URL parameters and categorise by likely vulnerability class."""
         Logger.info("Analyzing URL parameters...")
-        
-        params = {}
-        interesting_params = set()
-        
-        sensitive_patterns = [
-            'id', 'user', 'admin', 'password', 'key', 'token',
-            'file', 'path', 'dir', 'folder', 'document',
-            'url', 'redirect', 'return', 'next', 'callback',
-            'email', 'username', 'debug', 'test', 'api'
-        ]
-        
+
+        params: dict[str, int] = {}
+        interesting_params: set[str] = set()
+        categorized: dict[str, set[str]] = {cat: set() for cat in self._PARAM_CATEGORIES}
+        # Sample URLs per interesting parameter for context
+        param_examples: dict[str, str] = {}
+
+        # Flatten interesting patterns for quick membership test
+        all_interesting = {p for plist in self._PARAM_CATEGORIES.values() for p in plist}
+
         try:
             with open(url_file, 'r') as f:
                 urls = [line.strip() for line in f if line.strip()]
-            
+
             for url in urls:
-                if '?' in url:
-                    query_params = parse_qs(urlparse(url).query)
-                    for param in query_params.keys():
-                        params[param] = params.get(param, 0) + 1
-                        
-                        param_lower = param.lower()
-                        if any(pattern in param_lower for pattern in sensitive_patterns):
-                            interesting_params.add(param)
-            
-            # Save results
+                if '?' not in url:
+                    continue
+                query_params = parse_qs(urlparse(url).query)
+                for param in query_params:
+                    params[param] = params.get(param, 0) + 1
+                    param_lower = param.lower()
+
+                    if param_lower in all_interesting or any(p in param_lower for p in all_interesting):
+                        interesting_params.add(param)
+                        if param not in param_examples:
+                            param_examples[param] = url
+
+                    for cat, patterns in self._PARAM_CATEGORIES.items():
+                        if param_lower in patterns or any(p in param_lower for p in patterns):
+                            categorized[cat].add(param)
+
+            # ── Save raw parameter list ───────────────────────────────────────
             all_params_file = self.output_mgr.get_path('parameters', 'all_parameters.txt')
             with open(all_params_file, 'w') as f:
-                for param, count in sorted(params.items(), key=lambda x: x[1], reverse=True):
-                    f.write(f"{param}: {count}\n")
-            
+                for p, cnt in sorted(params.items(), key=lambda x: x[1], reverse=True):
+                    f.write(f"{p}: {cnt}\n")
+
+            # ── Save interesting parameters ───────────────────────────────────
             interesting_file = self.output_mgr.get_path('parameters', 'interesting_parameters.txt')
             with open(interesting_file, 'w') as f:
                 f.write('\n'.join(sorted(interesting_params)))
-            
-            Logger.success(f"Found {len(params)} unique parameters, {len(interesting_params)} interesting")
-            
+
+            # ── Save categorized parameters ───────────────────────────────────
+            cat_file = self.output_mgr.get_path('parameters', 'categorized_parameters.txt')
+            with open(cat_file, 'w') as f:
+                for cat, pset in categorized.items():
+                    if pset:
+                        f.write(f"[{cat}] {', '.join(sorted(pset))}\n")
+                        for p in sorted(pset):
+                            if p in param_examples:
+                                f.write(f"  example: {param_examples[p]}\n")
+
+            total_cats = sum(1 for v in categorized.values() if v)
+            Logger.success(
+                f"Found {len(params)} unique parameters, {len(interesting_params)} interesting "
+                f"({total_cats} vuln categories)"
+            )
+
         except Exception as e:
             Logger.error(f"Error analyzing parameters: {e}")
 
@@ -2628,56 +2968,92 @@ class ReportGenerator:
                 lines.append(f"- **{name}**: {count}")
         
         lines.append("\n---\n")
-        
-        # Vulnerabilities
-        vuln_file = self.output_mgr.get_path('vulnerabilities', 'nuclei_results.txt')
-        if vuln_file.exists():
-            with open(vuln_file, 'r') as f:
-                vulns = [line.strip() for line in f if line.strip()]
-            
-            if vulns:
-                lines.append("## 🚨 Vulnerabilities\n")
-                for vuln in vulns[:20]:
-                    lines.append(f"- {vuln}")
-                lines.append("\n---\n")
-        
+
+        def _section(title: str, items: list[str], emoji: str = '⚠️', cap: int = 30):
+            if not items:
+                return
+            lines.append(f"## {emoji} {title}\n")
+            for item in items[:cap]:
+                lines.append(f"- `{item}`")
+            if len(items) > cap:
+                lines.append(f"\n_…and {len(items) - cap} more (see output files)_")
+            lines.append("\n---\n")
+
+        def _read(category: str, filename: str) -> list[str]:
+            p = self.output_mgr.get_path(category, filename)
+            if not p.exists():
+                return []
+            with open(p) as f:
+                return [l.strip() for l in f if l.strip()]
+
+        # Email security
+        email_issues = _read('vulnerabilities', 'email_security.txt')
+        email_issues = [l for l in email_issues if l.startswith('[')]
+        _section('Email Security Issues (SPF/DMARC/DKIM)', email_issues, '📧')
+
+        # Security headers
+        header_issues = _read('vulnerabilities', 'security_headers.txt')
+        _section('HTTP Security Header Issues', header_issues, '🔒')
+
+        # CORS
+        cors_issues = _read('vulnerabilities', 'cors_misconfig.txt')
+        _section('CORS Misconfigurations', cors_issues, '🌐')
+
+        # Nuclei
+        _section('Vulnerabilities (Nuclei)', _read('vulnerabilities', 'nuclei_results.txt'), '🚨')
+
+        # Dalfox
+        _section('XSS Findings (Dalfox)', _read('vulnerabilities', 'dalfox_results.txt'), '💉')
+
+        # Takeover
+        _section('Subdomain Takeover Candidates', _read('takeover', 'subzy_results.txt'), '🎯')
+
         # Git exposure
-        git_file = self.output_mgr.get_path('git', 'exposed_git.txt')
-        if git_file.exists():
-            with open(git_file, 'r') as f:
-                repos = [line.strip() for line in f if line.strip()]
-            
-            if repos:
-                lines.append("## ⚠️ Exposed Git Repositories\n")
-                for repo in repos:
-                    lines.append(f"- {repo}")
-                lines.append("\n---\n")
-        
+        _section('Exposed Git Repositories', _read('git', 'exposed_git.txt'), '📁')
+
+        # Zone transfer
+        _section('Zone Transfer Results', _read('dns', 'zone_transfer.txt'), '🔓')
+
+        # Categorized parameters
+        cat_params = _read('parameters', 'categorized_parameters.txt')
+        if cat_params:
+            lines.append("## 🧩 Interesting Parameters by Category\n")
+            for item in cat_params[:50]:
+                lines.append(f"  {item}")
+            lines.append("\n---\n")
+
         # Save report
         with open(report_file, 'w') as f:
             f.write('\n'.join(lines))
-        
+
         Logger.success(f"Report: {report_file}")
     
     def generate_json_report(self, scan_mode: str = 'passive'):
         """Generate JSON report"""
+        def _rl(cat: str, fname: str) -> list[str]:
+            return self._read_lines(cat, fname)
+
         statistics = {
-            'subdomains': len(self._read_lines('subdomains', 'all_subdomains.txt')),
-            'bruteforce_subdomains': len(self._read_lines('subdomains', 'bruteforce.txt')),
-            'resolved': len(self._read_lines('dns', 'resolved.txt')),
-            'active_http': len(self._read_lines('http', 'alive.txt')),
-            'urls': len(self._read_lines('urls', 'urls_clean.txt')),
-            'js_files': len(self._read_lines('js', 'all_js_files.txt')),
-            'interesting_parameters': len(self._read_lines('parameters', 'interesting_parameters.txt')),
-            'open_ports': len(self._read_lines('ports', 'open_ports.txt')),
-            'nuclei_findings': len(self._read_lines('vulnerabilities', 'nuclei_results.txt')),
-            'dalfox_findings': len(self._read_lines('vulnerabilities', 'dalfox_results.txt')),
-            'subzy_findings': len(self._read_lines('takeover', 'subzy_results.txt')),
-            'subjack_findings': len(self._read_lines('takeover', 'subjack_results.txt')),
-            'git_exposures': len(self._read_lines('git', 'exposed_git.txt')),
-            'cloud_aws': len(self._read_lines('cloud', 'aws_services.txt')),
-            'cloud_azure': len(self._read_lines('cloud', 'azure_services.txt')),
-            'cloud_gcp': len(self._read_lines('cloud', 'gcp_services.txt')),
+            'subdomains':             len(_rl('subdomains', 'all_subdomains.txt')),
+            'bruteforce_subdomains':  len(_rl('subdomains', 'bruteforce.txt')),
+            'resolved':               len(_rl('dns', 'resolved.txt')),
+            'active_http':            len(_rl('http', 'alive.txt')),
+            'urls':                   len(_rl('urls', 'urls_clean.txt')),
+            'js_files':               len(_rl('js', 'all_js_files.txt')),
+            'interesting_parameters': len(_rl('parameters', 'interesting_parameters.txt')),
+            'open_ports':             len(_rl('ports', 'open_ports.txt')),
+            'nuclei_findings':        len(_rl('vulnerabilities', 'nuclei_results.txt')),
+            'dalfox_findings':        len(_rl('vulnerabilities', 'dalfox_results.txt')),
+            'security_header_issues': len(_rl('vulnerabilities', 'security_headers.txt')),
+            'email_security_issues':  len([l for l in _rl('vulnerabilities', 'email_security.txt') if l.startswith('[')]),
+            'cors_findings':          len(_rl('vulnerabilities', 'cors_misconfig.txt')),
+            'zone_transfer_records':  len(_rl('dns', 'zone_transfer.txt')),
+            'subzy_findings':         len(_rl('takeover', 'subzy_results.txt')),
+            'subjack_findings':       len(_rl('takeover', 'subjack_results.txt')),
+            'git_exposures':          len(_rl('git', 'exposed_git.txt')),
+            'cloud_aws':              len(_rl('cloud', 'aws_services.txt')),
+            'cloud_azure':            len(_rl('cloud', 'azure_services.txt')),
+            'cloud_gcp':              len(_rl('cloud', 'gcp_services.txt')),
         }
 
         diff_summary = {}
@@ -2693,18 +3069,25 @@ class ReportGenerator:
             'scan_directory': str(self.output_mgr.base_dir),
             'statistics': statistics,
             'findings': {
-                'nuclei': self._read_lines('vulnerabilities', 'nuclei_results.txt'),
-                'dalfox': self._read_lines('vulnerabilities', 'dalfox_results.txt'),
+                'nuclei':           _rl('vulnerabilities', 'nuclei_results.txt'),
+                'dalfox':           _rl('vulnerabilities', 'dalfox_results.txt'),
+                'security_headers': _rl('vulnerabilities', 'security_headers.txt'),
+                'email_security':   [l for l in _rl('vulnerabilities', 'email_security.txt') if l.startswith('[')],
+                'cors':             _rl('vulnerabilities', 'cors_misconfig.txt'),
+                'zone_transfer':    _rl('dns', 'zone_transfer.txt'),
                 'takeover': {
-                    'subzy': self._read_lines('takeover', 'subzy_results.txt'),
-                    'subjack': self._read_lines('takeover', 'subjack_results.txt'),
+                    'subzy':   _rl('takeover', 'subzy_results.txt'),
+                    'subjack': _rl('takeover', 'subjack_results.txt'),
                 },
-                'git_exposure': self._read_lines('git', 'exposed_git.txt'),
-                'parameters': self._read_lines('parameters', 'interesting_parameters.txt'),
+                'git_exposure': _rl('git', 'exposed_git.txt'),
+                'parameters': {
+                    'interesting':  _rl('parameters', 'interesting_parameters.txt'),
+                    'categorized':  _rl('parameters', 'categorized_parameters.txt'),
+                },
                 'cloud': {
-                    'aws': self._read_lines('cloud', 'aws_services.txt'),
-                    'azure': self._read_lines('cloud', 'azure_services.txt'),
-                    'gcp': self._read_lines('cloud', 'gcp_services.txt'),
+                    'aws':   _rl('cloud', 'aws_services.txt'),
+                    'azure': _rl('cloud', 'azure_services.txt'),
+                    'gcp':   _rl('cloud', 'gcp_services.txt'),
                 },
                 'diff': diff_summary,
             }
@@ -2762,8 +3145,9 @@ class GivEnum:
         # 1. Subdomain enumeration (passive sources)
         subs_file = self.subdomain_enum.run_all()
 
-        # 1a. Zone transfer check
+        # 1a. Zone transfer + email security (DNS-only, runs early)
         self.recon_enricher.check_zone_transfer()
+        self.recon_enricher.check_email_security()
 
         # 1b. DNS brute-force (active only)
         if active:
@@ -2823,9 +3207,10 @@ class GivEnum:
 
         self.http_prober.check_urls_with_hakcheckurl(alive_file)
 
-        # 5b. CORS misconfig + WAF detection
+        # 5b. CORS misconfig + WAF detection + security headers
         self.recon_enricher.detect_cors_misconfig(alive_file)
         self.recon_enricher.detect_waf(alive_file)
+        self.recon_enricher.check_security_headers(alive_file)
 
         # 6. Screenshots
         if not skip_screenshots:
@@ -2834,8 +3219,9 @@ class GivEnum:
         # 7. URL Collection
         all_urls = self.url_collector.collect_from_archives(alive_file)
 
-        # 8. Probe common paths with meg
+        # 8. Probe common paths with meg + parse robots.txt / sitemap.xml
         all_urls.update(self.url_collector.probe_paths_with_meg(alive_file))
+        all_urls.update(self.url_collector.parse_robots_sitemap(alive_file))
 
         # 9. Photon crawl (first 5 alive hosts to avoid excess)
         try:
@@ -2902,32 +3288,8 @@ class GivEnum:
         self._print_summary(elapsed)
 
     def _generate_analysis_report(self):
-        """Generate analysis.md using the standalone analyzer when available."""
-        analyzer_script = Path(__file__).with_name('analyze_results.py')
-        if not analyzer_script.exists():
-            Logger.warning("analyze_results.py not found — skipping analysis.md generation")
-            return
-
-        analysis_file = self.output_mgr.get_path('reports', 'analysis.md')
-        Logger.info("Generating analysis report...")
-
-        try:
-            _t0 = time.time()
-            result = subprocess.run(
-                [sys.executable, '-u', str(analyzer_script), str(self.output_mgr.base_dir), '--export', str(analysis_file)],
-                capture_output=True,
-                text=True,
-                timeout=300
-            )
-            _track_captured('analyze_results', result, _t0, self.output_mgr.dirs['logs'])
-
-            if result.returncode == 0 and analysis_file.exists():
-                Logger.success(f"Analysis: {analysis_file}")
-            else:
-                Logger.warning("Analysis report generation did not complete successfully")
-
-        except Exception as e:
-            Logger.warning(f"Error generating analysis report: {e}")
+        """No-op: analyze_results.py has been removed from this project."""
+        pass
 
     def _print_summary(self, elapsed_time: float):
         """Print final summary"""

@@ -81,6 +81,7 @@ function SummaryTab({ data }: { data: ScanData }) {
   const totalVulns = Object.values(data.nuclei).flat().length
   const hasTakeover = data.subjack.length + data.subzy.length > 0
   const hasCloud = data.cloudAws.length + data.cloudAzure.length + data.cloudGcp.length > 0
+  const hasHeaderIssues = data.securityHeaders.length > 0 || data.emailSecurity.length > 0 || data.corsFindings.length > 0
 
   return (
     <div className="grid md:grid-cols-2 gap-4">
@@ -169,7 +170,33 @@ function SummaryTab({ data }: { data: ScanData }) {
           </Card>
         )}
 
-        {!totalVulns && !data.gitExposed.length && !hasTakeover && !hasCloud && data.topTech.length === 0 && (
+        {/* Security header / email quick summary */}
+        {hasHeaderIssues && (
+          <Card title="Passive Security Checks" accent="var(--cyan)">
+            <div className="space-y-1 text-sm">
+              {data.emailSecurity.length > 0 && (
+                <div className="flex justify-between">
+                  <span style={{ color: 'var(--text-muted)' }}>📧 Email (SPF/DMARC)</span>
+                  <span className="font-mono font-bold" style={{ color: '#f87171' }}>{data.emailSecurity.length}</span>
+                </div>
+              )}
+              {data.securityHeaders.length > 0 && (
+                <div className="flex justify-between">
+                  <span style={{ color: 'var(--text-muted)' }}>🔒 Security Headers</span>
+                  <span className="font-mono font-bold" style={{ color: '#fb923c' }}>{data.securityHeaders.length}</span>
+                </div>
+              )}
+              {data.corsFindings.length > 0 && (
+                <div className="flex justify-between">
+                  <span style={{ color: 'var(--text-muted)' }}>🌐 CORS</span>
+                  <span className="font-mono font-bold" style={{ color: '#fb923c' }}>{data.corsFindings.length}</span>
+                </div>
+              )}
+            </div>
+          </Card>
+        )}
+
+        {!totalVulns && !data.gitExposed.length && !hasTakeover && !hasCloud && !hasHeaderIssues && data.topTech.length === 0 && (
           <EmptyState icon="✅" text="No critical findings" hint="Run with --active for deeper analysis" />
         )}
       </div>
@@ -361,48 +388,147 @@ function UrlsTab({ data }: { data: ScanData }) {
 
 // ── Tab: Vulnerabilities ──────────────────────────────────────
 
+function FindingList({ items, borderColor, textColor, maxH = '40vh' }: {
+  items: string[]
+  borderColor: string
+  textColor: string
+  maxH?: string
+}) {
+  return (
+    <div className="overflow-y-auto" style={{ maxHeight: maxH }}>
+      {items.map((item, i) => (
+        <div key={i} className="px-4 py-2 border-b text-xs font-mono break-all"
+          style={{ borderColor, color: textColor }}>
+          {item}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function VulnsTab({ data }: { data: ScanData }) {
   const sevs = ['critical', 'high', 'medium', 'low', 'info'] as const
-  const total = sevs.reduce((acc, s) => acc + data.nuclei[s].length, 0)
+  const nucleiTotal = sevs.reduce((acc, s) => acc + data.nuclei[s].length, 0)
 
-  if (total === 0 && data.dalfox.length === 0) {
-    return <EmptyState icon="✅" text="No vulnerability findings"
-      hint="Run with --active to enable nuclei + dalfox scanning" />
+  const hasAny =
+    nucleiTotal > 0 ||
+    data.dalfox.length > 0 ||
+    data.securityHeaders.length > 0 ||
+    data.emailSecurity.length > 0 ||
+    data.corsFindings.length > 0 ||
+    data.zoneTransfer.length > 0
+
+  if (!hasAny) {
+    return (
+      <EmptyState icon="✅" text="No vulnerability findings"
+        hint="Passive scans check headers, email security, CORS. Run with --active for nuclei + dalfox." />
+    )
+  }
+
+  // Colour by severity prefix [high] / [medium] / [low] / [info]
+  function sevColor(line: string): string {
+    if (line.startsWith('[high]') || line.startsWith('[critical]')) return '#f87171'
+    if (line.startsWith('[medium]')) return '#fb923c'
+    if (line.startsWith('[low]')) return '#facc15'
+    return 'var(--text-muted)'
   }
 
   return (
     <div className="space-y-4">
-      {sevs.map((sev) =>
-        data.nuclei[sev].length > 0 ? (
-          <div key={sev} className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
-            <div className="flex items-center gap-3 px-4 py-3 border-b" style={{ borderColor: 'var(--border)', background: 'var(--surface)' }}>
-              <SevBadge sev={sev} />
-              <span className="text-sm font-medium" style={{ color: 'var(--text)' }}>{data.nuclei[sev].length} findings</span>
-            </div>
-            <div className="overflow-y-auto" style={{ maxHeight: '40vh' }}>
-              {data.nuclei[sev].map((item, i) => (
-                <div key={`${sev}-${i}`} className="px-4 py-2 border-b text-xs font-mono" style={{ borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }}>
-                  {item}
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : null
-      )}
 
-      {data.dalfox.length > 0 && (
-        <div className="rounded-xl overflow-hidden" style={{ border: '1px solid #7f1d1d' }}>
-          <div className="flex items-center gap-3 px-4 py-3 border-b" style={{ borderColor: '#7f1d1d', background: '#450a0a' }}>
-            <Badge style={{ background: '#7f1d1d', color: '#fca5a5' }}>XSS</Badge>
-            <span className="text-sm font-medium" style={{ color: '#fca5a5' }}>Dalfox — {data.dalfox.length} findings</span>
+      {/* Email Security */}
+      {data.emailSecurity.length > 0 && (
+        <div className="rounded-xl overflow-hidden" style={{ border: '1px solid #3b1278' }}>
+          <div className="flex items-center gap-3 px-4 py-3 border-b" style={{ borderColor: '#3b1278', background: '#1e0a4a' }}>
+            <Badge style={{ background: '#3b1278', color: '#c4b5fd' }}>📧</Badge>
+            <span className="text-sm font-medium" style={{ color: '#c4b5fd' }}>
+              Email Security (SPF/DMARC/DKIM) — {data.emailSecurity.length} issue(s)
+            </span>
           </div>
-          <div className="overflow-y-auto" style={{ maxHeight: '40vh' }}>
-            {data.dalfox.map((item, i) => (
-              <div key={`dalfox-${i}`} className="px-4 py-2 border-b text-xs font-mono" style={{ borderColor: '#7f1d1d', color: '#fca5a5' }}>
+          <div className="overflow-y-auto" style={{ maxHeight: '30vh' }}>
+            {data.emailSecurity.map((item, i) => (
+              <div key={i} className="px-4 py-2 border-b text-xs font-mono break-all"
+                style={{ borderColor: '#3b1278', color: sevColor(item) }}>
                 {item}
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Security Headers */}
+      {data.securityHeaders.length > 0 && (
+        <div className="rounded-xl overflow-hidden" style={{ border: '1px solid #1e3a5f' }}>
+          <div className="flex items-center gap-3 px-4 py-3 border-b" style={{ borderColor: '#1e3a5f', background: '#0c1f35' }}>
+            <Badge style={{ background: '#1e3a5f', color: '#7dd3fc' }}>🔒</Badge>
+            <span className="text-sm font-medium" style={{ color: '#7dd3fc' }}>
+              Security Headers — {data.securityHeaders.length} issue(s)
+            </span>
+          </div>
+          <div className="overflow-y-auto" style={{ maxHeight: '40vh' }}>
+            {data.securityHeaders.map((item, i) => (
+              <div key={i} className="px-4 py-2 border-b text-xs font-mono break-all"
+                style={{ borderColor: '#1e3a5f', color: sevColor(item) }}>
+                {item}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* CORS */}
+      {data.corsFindings.length > 0 && (
+        <div className="rounded-xl overflow-hidden" style={{ border: '1px solid #7c2d12' }}>
+          <div className="flex items-center gap-3 px-4 py-3 border-b" style={{ borderColor: '#7c2d12', background: '#431407' }}>
+            <Badge style={{ background: '#7c2d12', color: '#fdba74' }}>🌐</Badge>
+            <span className="text-sm font-medium" style={{ color: '#fdba74' }}>
+              CORS Misconfigurations — {data.corsFindings.length}
+            </span>
+          </div>
+          <FindingList items={data.corsFindings} borderColor="#7c2d12" textColor="#fdba74" />
+        </div>
+      )}
+
+      {/* Zone Transfer */}
+      {data.zoneTransfer.length > 0 && (
+        <div className="rounded-xl overflow-hidden" style={{ border: '1px solid #7f1d1d' }}>
+          <div className="flex items-center gap-3 px-4 py-3 border-b" style={{ borderColor: '#7f1d1d', background: '#450a0a' }}>
+            <Badge style={{ background: '#7f1d1d', color: '#fca5a5' }}>🔓</Badge>
+            <span className="text-sm font-medium" style={{ color: '#fca5a5' }}>
+              Zone Transfer Exposed — {data.zoneTransfer.length} records
+            </span>
+          </div>
+          <FindingList items={data.zoneTransfer} borderColor="#7f1d1d" textColor="#fca5a5" />
+        </div>
+      )}
+
+      {/* Nuclei */}
+      {sevs.map((sev) =>
+        data.nuclei[sev].length > 0 ? (
+          <div key={sev} className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+            <div className="flex items-center gap-3 px-4 py-3 border-b"
+              style={{ borderColor: 'var(--border)', background: 'var(--surface)' }}>
+              <SevBadge sev={sev} />
+              <span className="text-sm font-medium" style={{ color: 'var(--text)' }}>
+                {data.nuclei[sev].length} findings
+              </span>
+            </div>
+            <FindingList items={data.nuclei[sev]} borderColor="var(--border-subtle)" textColor="var(--text-muted)" />
+          </div>
+        ) : null
+      )}
+
+      {/* Dalfox */}
+      {data.dalfox.length > 0 && (
+        <div className="rounded-xl overflow-hidden" style={{ border: '1px solid #7f1d1d' }}>
+          <div className="flex items-center gap-3 px-4 py-3 border-b"
+            style={{ borderColor: '#7f1d1d', background: '#450a0a' }}>
+            <Badge style={{ background: '#7f1d1d', color: '#fca5a5' }}>XSS</Badge>
+            <span className="text-sm font-medium" style={{ color: '#fca5a5' }}>
+              Dalfox — {data.dalfox.length} findings
+            </span>
+          </div>
+          <FindingList items={data.dalfox} borderColor="#7f1d1d" textColor="#fca5a5" />
         </div>
       )}
     </div>
@@ -673,7 +799,11 @@ export default function ScanTabs({ data }: { data: ScanData }) {
     subdomains: { value: data.subdomains.length + data.bruteforce.length, color: 'var(--cyan)' },
     hosts: { value: data.hosts.length, color: 'var(--green)' },
     urls: { value: data.urls.length, color: 'var(--purple)' },
-    vulns: { value: Object.values(data.nuclei).flat().length + data.dalfox.length, color: 'var(--red)' },
+    vulns: {
+      value: Object.values(data.nuclei).flat().length + data.dalfox.length +
+             data.securityHeaders.length + data.emailSecurity.length + data.corsFindings.length,
+      color: 'var(--red)',
+    },
     screenshots: { value: data.screenshots.length, color: 'var(--text-muted)' },
     tools: { value: toolFails, color: '#f87171' },
   }
