@@ -46,10 +46,18 @@ export interface DiffData {
 }
 
 export interface ToolLogEntry {
-  status: 'ok' | 'fail' | 'timeout' | 'not_found' | 'error'
+  status: 'ok' | 'partial' | 'fail' | 'timeout' | 'not_found' | 'error'
   rc: number
   elapsed: number
   msg?: string
+  // Optional extra counters surfaced by batch tools
+  found?: number
+  hosts?: number
+  timeouts?: number
+  failures?: number
+  urls?: number
+  discovered?: number
+  findings?: number
 }
 
 export interface ScanData extends ScanMeta {

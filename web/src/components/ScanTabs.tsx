@@ -644,9 +644,10 @@ function ToolsTab({ data }: { data: ScanData }) {
   }
 
   const ok = entries.filter(([, v]) => v.status === 'ok').length
+  const partial = entries.filter(([, v]) => v.status === 'partial').length
   const fail = entries.filter(([, v]) => v.status === 'fail').length
   const missing = entries.filter(([, v]) => v.status === 'not_found').length
-  const other = entries.length - ok - fail - missing
+  const other = entries.length - ok - partial - fail - missing
 
   async function openLog(tool: string) {
     setSelectedTool(tool)
@@ -665,18 +666,32 @@ function ToolsTab({ data }: { data: ScanData }) {
 
   function statusColor(status: string): string {
     if (status === 'ok') return '#4ade80'
+    if (status === 'partial') return '#facc15'
     if (status === 'fail') return '#f87171'
     if (status === 'timeout') return '#fb923c'
     if (status === 'not_found') return 'var(--text-subtle)'
-    return '#facc15'
+    return '#f97316'
   }
 
   function statusIcon(status: string): string {
     if (status === 'ok') return '✓'
+    if (status === 'partial') return '⚠'
     if (status === 'fail') return '✗'
     if (status === 'timeout') return '⏱'
     if (status === 'not_found') return '—'
     return '!'
+  }
+
+  function toolCounters(info: import('@/lib/types').ToolLogEntry): string {
+    const parts: string[] = []
+    if (info.found !== undefined)     parts.push(`${info.found} found`)
+    if (info.urls !== undefined)      parts.push(`${info.urls} urls`)
+    if (info.discovered !== undefined) parts.push(`${info.discovered} discovered`)
+    if (info.findings !== undefined)  parts.push(`${info.findings} findings`)
+    if (info.hosts !== undefined)     parts.push(`${info.hosts} hosts`)
+    if (info.timeouts !== undefined && info.timeouts > 0)  parts.push(`${info.timeouts} timeouts`)
+    if (info.failures !== undefined && info.failures > 0)  parts.push(`${info.failures} failures`)
+    return parts.join(' · ')
   }
 
   return (
@@ -684,6 +699,7 @@ function ToolsTab({ data }: { data: ScanData }) {
       {/* Stats bar */}
       <div className="flex flex-wrap gap-3 text-sm">
         <span style={{ color: '#4ade80' }}><span className="font-mono font-bold">{ok}</span> ok</span>
+        {partial > 0 && <span style={{ color: '#facc15' }}><span className="font-mono font-bold">{partial}</span> partial</span>}
         {fail > 0 && <span style={{ color: '#f87171' }}><span className="font-mono font-bold">{fail}</span> failed</span>}
         {other > 0 && <span style={{ color: '#fb923c' }}><span className="font-mono font-bold">{other}</span> timeout/error</span>}
         {missing > 0 && <span style={{ color: 'var(--text-subtle)' }}><span className="font-mono font-bold">{missing}</span> not installed</span>}
@@ -717,6 +733,9 @@ function ToolsTab({ data }: { data: ScanData }) {
                     </span>
                     {info.msg && (
                       <span className="text-xs ml-2" style={{ color: 'var(--text-subtle)' }}>{info.msg}</span>
+                    )}
+                    {toolCounters(info) && (
+                      <span className="text-xs ml-2" style={{ color: 'var(--text-muted)' }}>{toolCounters(info)}</span>
                     )}
                   </td>
                   <td className="px-4 py-2.5 font-mono text-xs" style={{ color: info.rc === 0 ? 'var(--text-muted)' : '#f87171' }}>

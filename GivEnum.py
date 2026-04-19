@@ -321,7 +321,7 @@ class CertificateTransparency:
     def query_crtsh(self) -> Set[str]:
         """Query crt.sh for subdomains"""
         Logger.info("Querying crt.sh...")
-        
+        _t0 = time.time()
         try:
             url = f"https://crt.sh/?q=%.{self.domain}&output=json"
             response = _api_request(url, timeout=30)
@@ -339,27 +339,33 @@ class CertificateTransparency:
                         normalized = normalized.rstrip('.')
                         if matches_domain(normalized, self.domain):
                             domains.add(normalized)
-                
+
                 output_file = self.output_mgr.get_path('subdomains', 'crtsh.txt')
                 with open(output_file, 'w') as f:
                     f.write('\n'.join(sorted(domains)) + '\n')
-                
+
+                _tool_log['crtsh'] = {'status': 'ok', 'rc': 0, 'elapsed': round(time.time() - _t0, 1), 'found': len(domains)}
                 Logger.success(f"crt.sh: {len(domains)} domains")
                 return domains
-                
+            else:
+                status_code = response.status_code if response else 0
+                _tool_log['crtsh'] = {'status': 'fail', 'rc': status_code, 'elapsed': round(time.time() - _t0, 1), 'msg': f'HTTP {status_code}'}
+                Logger.warning(f"crt.sh returned HTTP {status_code}")
+
         except Exception as e:
+            _tool_log['crtsh'] = {'status': 'error', 'rc': -1, 'elapsed': round(time.time() - _t0, 1), 'msg': str(e)}
             Logger.error(f"Error querying crt.sh: {e}")
-        
+
         return set()
     
     def query_certspotter(self, api_key: Optional[str] = None) -> Set[str]:
         """Query CertSpotter API"""
         Logger.info("Querying CertSpotter...")
-        
+        _t0 = time.time()
         try:
             url = f"https://api.certspotter.com/v1/issuances?domain={self.domain}&include_subdomains=true&expand=dns_names"
             headers = {}
-            
+
             if api_key:
                 headers['Authorization'] = f'Bearer {api_key}'
 
@@ -374,17 +380,22 @@ class CertificateTransparency:
                         normalized = name.strip().rstrip('.')
                         if matches_domain(normalized, self.domain):
                             domains.add(normalized.lstrip('*.'))
-                
+
                 output_file = self.output_mgr.get_path('subdomains', 'certspotter.txt')
                 with open(output_file, 'w') as f:
                     f.write('\n'.join(sorted(domains)) + '\n')
-                
+
+                _tool_log['certspotter'] = {'status': 'ok', 'rc': 0, 'elapsed': round(time.time() - _t0, 1), 'found': len(domains)}
                 Logger.success(f"CertSpotter: {len(domains)} domains")
                 return domains
-                
+            else:
+                status_code = response.status_code if response else 0
+                _tool_log['certspotter'] = {'status': 'fail', 'rc': status_code, 'elapsed': round(time.time() - _t0, 1), 'msg': f'HTTP {status_code}'}
+
         except Exception as e:
+            _tool_log['certspotter'] = {'status': 'error', 'rc': -1, 'elapsed': round(time.time() - _t0, 1), 'msg': str(e)}
             Logger.error(f"Error querying CertSpotter: {e}")
-        
+
         return set()
 
 
@@ -401,10 +412,11 @@ class PassiveAPIs:
         api_key = self.api_config.get_key('virustotal')
         if not api_key:
             Logger.warning("VirusTotal API key not configured")
+            _tool_log['virustotal'] = {'status': 'not_found', 'rc': -1, 'elapsed': 0, 'msg': 'No API key configured'}
             return set()
-        
+
         Logger.info("Querying VirusTotal...")
-        
+        _t0 = time.time()
         try:
             headers = {
                 'accept': 'application/json',
@@ -441,18 +453,20 @@ class PassiveAPIs:
             with open(json_file, 'w') as f:
                 json.dump({'pages': pages, 'count': len(domains)}, f, indent=2)
 
+            _tool_log['virustotal'] = {'status': 'ok', 'rc': 0, 'elapsed': round(time.time() - _t0, 1), 'found': len(domains)}
             Logger.success(f"VirusTotal: {len(domains)} domains")
             return domains
-                 
+
         except Exception as e:
+            _tool_log['virustotal'] = {'status': 'error', 'rc': -1, 'elapsed': round(time.time() - _t0, 1), 'msg': str(e)}
             Logger.error(f"Error querying VirusTotal: {e}")
-        
+
         return set()
     
     def query_alienvault(self) -> Set[str]:
         """Query AlienVault OTX"""
         Logger.info("Querying AlienVault OTX...")
-        
+        _t0 = time.time()
         try:
             url = f"https://otx.alienvault.com/api/v1/indicators/domain/{self.domain}/passive_dns"
             response = _api_request(url, timeout=30)
@@ -466,17 +480,22 @@ class PassiveAPIs:
                     normalized = hostname.strip().rstrip('.')
                     if matches_domain(normalized, self.domain):
                         domains.add(normalized)
-                
+
                 output_file = self.output_mgr.get_path('api_data', 'alienvault.txt')
                 with open(output_file, 'w') as f:
                     f.write('\n'.join(sorted(domains)) + '\n')
-                
+
+                _tool_log['alienvault'] = {'status': 'ok', 'rc': 0, 'elapsed': round(time.time() - _t0, 1), 'found': len(domains)}
                 Logger.success(f"AlienVault: {len(domains)} domains")
                 return domains
-                
+            else:
+                status_code = response.status_code if response else 0
+                _tool_log['alienvault'] = {'status': 'fail', 'rc': status_code, 'elapsed': round(time.time() - _t0, 1), 'msg': f'HTTP {status_code}'}
+
         except Exception as e:
+            _tool_log['alienvault'] = {'status': 'error', 'rc': -1, 'elapsed': round(time.time() - _t0, 1), 'msg': str(e)}
             Logger.error(f"Error querying AlienVault: {e}")
-        
+
         return set()
     
     def query_securitytrails(self) -> Set[str]:
@@ -484,10 +503,11 @@ class PassiveAPIs:
         api_key = self.api_config.get_key('securitytrails')
         if not api_key:
             Logger.warning("SecurityTrails API key not configured")
+            _tool_log['securitytrails'] = {'status': 'not_found', 'rc': -1, 'elapsed': 0, 'msg': 'No API key configured'}
             return set()
-        
+
         Logger.info("Querying SecurityTrails...")
-        
+        _t0 = time.time()
         try:
             url = f"https://api.securitytrails.com/v1/domain/{self.domain}/subdomains"
             headers = {'APIKEY': api_key}
@@ -500,17 +520,22 @@ class PassiveAPIs:
                 for subdomain in data.get('subdomains', []):
                     full_domain = f"{subdomain}.{self.domain}"
                     domains.add(full_domain)
-                
+
                 output_file = self.output_mgr.get_path('api_data', 'securitytrails.txt')
                 with open(output_file, 'w') as f:
                     f.write('\n'.join(sorted(domains)) + '\n')
-                
+
+                _tool_log['securitytrails'] = {'status': 'ok', 'rc': 0, 'elapsed': round(time.time() - _t0, 1), 'found': len(domains)}
                 Logger.success(f"SecurityTrails: {len(domains)} domains")
                 return domains
-                
+            else:
+                status_code = response.status_code if response else 0
+                _tool_log['securitytrails'] = {'status': 'fail', 'rc': status_code, 'elapsed': round(time.time() - _t0, 1), 'msg': f'HTTP {status_code}'}
+
         except Exception as e:
+            _tool_log['securitytrails'] = {'status': 'error', 'rc': -1, 'elapsed': round(time.time() - _t0, 1), 'msg': str(e)}
             Logger.error(f"Error querying SecurityTrails: {e}")
-        
+
         return set()
 
 
@@ -559,7 +584,7 @@ class SubdomainEnum:
             return subs
 
         except subprocess.TimeoutExpired:
-            _tool_log[tool_name] = {'status': 'timeout', 'rc': -1, 'elapsed': 600}
+            _tool_log[tool_name] = {'status': 'timeout', 'rc': -1, 'elapsed': round(time.time() - _t0, 1)}
             Logger.warning(f"{tool_name} timeout")
         except Exception as e:
             Logger.error(f"Error running {tool_name}: {e}")
@@ -645,9 +670,11 @@ class SubdomainEnum:
             return subs
 
         except subprocess.TimeoutExpired:
+            _tool_log['uncover'] = {'status': 'timeout', 'rc': -1, 'elapsed': round(time.time() - _t0, 1)}
             Logger.warning("uncover timeout")
             return set()
         except Exception as e:
+            _tool_log['uncover'] = {'status': 'error', 'rc': -1, 'elapsed': round(time.time() - _t0, 1), 'msg': str(e)}
             Logger.error(f"Error in uncover: {e}")
             return set()
 
@@ -1114,11 +1141,18 @@ class URLCollector:
     def _summarize_batch_status(total: int, failures: int, timeouts: int) -> Tuple[str, int]:
         if total <= 0:
             return 'ok', 0
-        if failures + timeouts < total:
+        bad = failures + timeouts
+        if bad == 0:
             return 'ok', 0
-        if timeouts and failures == 0:
-            return 'timeout', -1
-        return 'fail', 1
+        if bad >= total:
+            # Everything failed
+            if timeouts and failures == 0:
+                return 'timeout', -1
+            return 'fail', 1
+        # Some succeeded — report partial when >30% failed/timed out
+        if bad / total > 0.30:
+            return 'partial', 0
+        return 'ok', 0
 
     @staticmethod
     def _parse_meg_urls(content: str) -> Set[str]:
@@ -1202,6 +1236,7 @@ class URLCollector:
             return all_urls
             
         except Exception as e:
+            _tool_log['xurlfind3r'] = {'status': 'error', 'rc': -1, 'elapsed': 0, 'msg': str(e)}
             Logger.error(f"Error in xurlfind3r: {e}")
             return set()
 
@@ -1249,9 +1284,8 @@ class URLCollector:
                     self._append_log(log_file, f"{host} (error)", str(e))
 
             total = min(len(hosts), 50)
-            ok_count = total - katana_timeouts - katana_failures
-            status = 'ok' if ok_count > total // 2 else ('partial' if ok_count > 0 else 'fail')
-            _tool_log['katana'] = {'status': status, 'rc': 0 if status == 'ok' else 1, 'elapsed': round(time.time() - _t0, 1), 'urls': len(all_urls), 'timeouts': katana_timeouts, 'failures': katana_failures}
+            status, rc = self._summarize_batch_status(total, katana_failures, katana_timeouts)
+            _tool_log['katana'] = {'status': status, 'rc': rc, 'elapsed': round(time.time() - _t0, 1), 'urls': len(all_urls), 'timeouts': katana_timeouts, 'failures': katana_failures}
 
             with open(output_file, 'w') as f:
                 f.write('\n'.join(sorted(all_urls)) + '\n')
@@ -1509,10 +1543,22 @@ class URLCollector:
         with open(paths_file, 'w') as f:
             f.write('\n'.join(interesting_paths) + '\n')
 
+        # Sample hosts to keep meg runtime bounded (80+ paths × many hosts = slow)
+        _MEG_HOST_LIMIT = 20
+        sampled_file = self.output_mgr.get_path('urls', 'meg_hosts_sample.txt')
         try:
-            _t0 = time.time()
+            all_hosts = [l.strip() for l in input_file.read_text().splitlines() if l.strip()]
+            with open(sampled_file, 'w') as f:
+                f.write('\n'.join(all_hosts[:_MEG_HOST_LIMIT]) + '\n')
+            if len(all_hosts) > _MEG_HOST_LIMIT:
+                Logger.info(f"meg: sampling {_MEG_HOST_LIMIT}/{len(all_hosts)} hosts to stay within time budget")
+        except Exception:
+            sampled_file = input_file  # fallback
+
+        _t0 = time.time()
+        try:
             result = subprocess.run(
-                ['meg', '-d', '1000', '-s', '200', '-v', str(paths_file), str(input_file), str(meg_dir)],
+                ['meg', '-d', '1000', '-s', '200', '-v', str(paths_file), str(sampled_file), str(meg_dir)],
                 capture_output=True,
                 text=True,
                 timeout=600
@@ -1533,26 +1579,43 @@ class URLCollector:
             Logger.success(f"meg: {len(found)} interesting paths found")
             return found
 
+        except subprocess.TimeoutExpired:
+            elapsed = round(time.time() - _t0, 1)
+            _tool_log['meg'] = {'status': 'timeout', 'rc': -1, 'elapsed': elapsed,
+                                'msg': f'Timed out after {elapsed}s'}
+            Logger.warning(f"meg: timed out after {elapsed}s")
+            return set()
         except Exception as e:
+            _tool_log['meg'] = {'status': 'error', 'rc': -1, 'elapsed': round(time.time() - _t0, 1), 'msg': str(e)}
             Logger.error(f"Error in meg: {e}")
             return set()
 
     def parse_robots_sitemap(self, alive_file: Path) -> Set[str]:
         """Parse robots.txt Disallow paths and sitemap.xml URLs from live hosts."""
         if not alive_file.exists():
+            _tool_log['robots_sitemap'] = {'status': 'ok', 'rc': 0, 'elapsed': 0, 'discovered': 0}
             return set()
 
         with open(alive_file) as f:
             hosts = [l.strip() for l in f if l.strip()]
 
+        # Cap hosts to avoid unbounded runtime (8s × N hosts × sitemaps can blow up)
+        _HOST_LIMIT = 20
+        _SITEMAP_LIMIT = 3   # max sitemaps to fetch per host
+        if len(hosts) > _HOST_LIMIT:
+            Logger.info(f"robots_sitemap: sampling {_HOST_LIMIT}/{len(hosts)} hosts")
+            hosts = hosts[:_HOST_LIMIT]
+
         discovered: Set[str] = set()
         robots_paths: Set[str] = set()
-        sitemap_urls: Set[str] = set()
         session = requests.Session()
         session.headers['User-Agent'] = USER_AGENT
+        _t0 = time.time()
 
         for host in hosts:
-            # robots.txt
+            host_sitemaps: list[str] = []
+
+            # robots.txt — collect paths and sitemap references
             try:
                 r = session.get(f"{host.rstrip('/')}/robots.txt", timeout=8, allow_redirects=True)
                 if r.status_code == 200 and 'text/plain' in r.headers.get('Content-Type', ''):
@@ -1565,13 +1628,17 @@ class URLCollector:
                                 discovered.add(f"{host.rstrip('/')}{path_val}")
                         elif line.lower().startswith('sitemap:'):
                             sm_url = line.split(':', 1)[1].strip()
-                            if sm_url:
-                                sitemap_urls.add(sm_url)
+                            if sm_url and len(host_sitemaps) < _SITEMAP_LIMIT:
+                                host_sitemaps.append(sm_url)
             except Exception:
                 pass
 
-            # sitemap.xml
-            for sm_url in list(sitemap_urls) + [f"{host.rstrip('/')}/sitemap.xml"]:
+            # Default sitemap if no robots.txt references found
+            if not host_sitemaps:
+                host_sitemaps = [f"{host.rstrip('/')}/sitemap.xml"]
+
+            # Fetch sitemaps (scoped to this host, capped at _SITEMAP_LIMIT)
+            for sm_url in host_sitemaps[:_SITEMAP_LIMIT]:
                 try:
                     r = session.get(sm_url, timeout=8, allow_redirects=True)
                     if r.status_code == 200:
@@ -1579,6 +1646,11 @@ class URLCollector:
                             discovered.add(url_match.strip())
                 except Exception:
                     pass
+
+        elapsed = round(time.time() - _t0, 1)
+        _tool_log['robots_sitemap'] = {
+            'status': 'ok', 'rc': 0, 'elapsed': elapsed, 'discovered': len(discovered)
+        }
 
         # Persist discovered paths
         if robots_paths:
@@ -2171,14 +2243,22 @@ class ReconEnricher:
         return results
 
     def detect_cors_misconfig(self, alive_file: Path, sample: int = 30):
-        """Check for CORS misconfigurations on a sample of live hosts."""
+        """Check for CORS misconfigurations on a sample of live hosts.
+
+        Severity:
+          [high]   Origin reflected back AND Access-Control-Allow-Credentials: true
+          [medium] Origin reflected back (no credentials header)
+          [info]   ACAO: * (wildcard — not exploitable unless used with credentialled APIs)
+        """
         Logger.info("Checking CORS misconfigurations...")
         if not alive_file.exists():
+            _tool_log['cors'] = {'status': 'ok', 'rc': 0, 'elapsed': 0, 'findings': 0}
             return
         with open(alive_file) as f:
             hosts = [l.strip() for l in f if l.strip()][:sample]
 
         findings = []
+        _t0 = time.time()
         for host in hosts:
             try:
                 resp = requests.get(
@@ -2188,13 +2268,26 @@ class ReconEnricher:
                     allow_redirects=False,
                 )
                 acao = resp.headers.get('Access-Control-Allow-Origin', '')
-                if acao == 'https://evil.com' or acao == '*':
-                    findings.append(f"{host} → ACAO: {acao}")
+                acac = resp.headers.get('Access-Control-Allow-Credentials', '').lower()
+
+                if acao == 'https://evil.com':
+                    # Origin was reflected
+                    if acac == 'true':
+                        findings.append(f"[high] {host} → Origin reflected + ACAC:true (credentialled CORS)")
+                    else:
+                        findings.append(f"[medium] {host} → Origin reflected (no credentials)")
+                elif acao == '*':
+                    # Wildcard — not directly exploitable with credentials (browsers block it)
+                    findings.append(f"[info] {host} → ACAO: * (wildcard, review if used by credentialled clients)")
             except Exception:
                 pass
 
+        elapsed = round(time.time() - _t0, 1)
+        _tool_log['cors'] = {'status': 'ok', 'rc': 0, 'elapsed': elapsed, 'findings': len(findings)}
+
         if findings:
-            Logger.warning(f"CORS misconfigs found: {len(findings)}")
+            high_count = sum(1 for f in findings if f.startswith('[high]'))
+            Logger.warning(f"CORS: {len(findings)} finding(s) ({high_count} high)")
             out = self.output_mgr.get_path('vulnerabilities', 'cors_misconfig.txt')
             with open(out, 'w') as f:
                 f.write('\n'.join(findings) + '\n')
@@ -2338,14 +2431,15 @@ class ReconEnricher:
         with open(alive_file) as f:
             hosts = [l.strip() for l in f if l.strip()][:sample]
 
-        # (header, friendly-name, severity)
+        # (header, friendly-name, severity, html_only)
+        # html_only=True → only flag for HTML pages; API/JSON responses don't need these browser headers
         REQUIRED_HEADERS = [
-            ('Strict-Transport-Security',  'HSTS',                   'high'),
-            ('Content-Security-Policy',    'Content-Security-Policy','medium'),
-            ('X-Frame-Options',            'X-Frame-Options',        'medium'),
-            ('X-Content-Type-Options',     'X-Content-Type-Options', 'low'),
-            ('Referrer-Policy',            'Referrer-Policy',        'low'),
-            ('Permissions-Policy',         'Permissions-Policy',     'low'),
+            ('Strict-Transport-Security',  'HSTS',                   'high',   False),
+            ('Content-Security-Policy',    'Content-Security-Policy','medium', True),
+            ('X-Frame-Options',            'X-Frame-Options',        'medium', True),
+            ('X-Content-Type-Options',     'X-Content-Type-Options', 'low',    False),
+            ('Referrer-Policy',            'Referrer-Policy',        'low',    True),
+            ('Permissions-Policy',         'Permissions-Policy',     'low',    True),
         ]
 
         all_findings: list[str] = []
@@ -2357,10 +2451,17 @@ class ReconEnricher:
                 resp = session.get(host, timeout=10, allow_redirects=True)
                 resp_headers_lower = {k.lower() for k in resp.headers}
 
+                # Determine if this is an HTML response (browser-only headers only apply here)
+                content_type = resp.headers.get('Content-Type', '').lower()
+                is_html = 'text/html' in content_type
+
                 # Missing headers
-                for header, name, severity in REQUIRED_HEADERS:
+                for header, name, severity, html_only in REQUIRED_HEADERS:
                     # HSTS only matters on HTTPS
                     if header == 'Strict-Transport-Security' and not host.startswith('https://'):
+                        continue
+                    # Browser-only headers (CSP, X-Frame-Options, etc.) don't apply to API/JSON endpoints
+                    if html_only and not is_html:
                         continue
                     if header.lower() not in resp_headers_lower:
                         all_findings.append(f"[{severity}] {host} → Missing {header}")
