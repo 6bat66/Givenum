@@ -1294,6 +1294,7 @@ class URLCollector:
             return all_urls
 
         except Exception as e:
+            _tool_log['katana'] = {'status': 'error', 'rc': -1, 'elapsed': 0, 'msg': str(e)}
             Logger.error(f"Error in katana: {e}")
             return set()
 
@@ -1372,6 +1373,7 @@ class URLCollector:
                 Logger.success(f"gau: {len(urls)} URLs (timeouts={timeouts}, failures={failures})")
 
             except Exception as e:
+                _tool_log['gau'] = {'status': 'error', 'rc': -1, 'elapsed': 0, 'msg': str(e)}
                 Logger.error(f"Error in gau: {e}")
 
         # Waybackurls — root domain + www only (same reason as gau: ~3 min per domain)
@@ -1431,6 +1433,7 @@ class URLCollector:
                 Logger.success(f"waybackurls: {len(urls)} URLs (timeouts={timeouts}, failures={failures})")
 
             except Exception as e:
+                _tool_log['waybackurls'] = {'status': 'error', 'rc': -1, 'elapsed': 0, 'msg': str(e)}
                 Logger.error(f"Error in waybackurls: {e}")
 
         return all_urls
@@ -1443,9 +1446,8 @@ class URLCollector:
 
         Logger.info("Crawling with hakrawler...")
         output_file = self.output_mgr.get_path('urls', 'hakrawler.txt')
-
+        _t0 = time.time()
         try:
-            _t0 = time.time()
             with open(input_file, 'r') as f:
                 result = subprocess.run(
                     ['hakrawler', '-d', '2', '-u', '-timeout', '10'],
@@ -1464,7 +1466,12 @@ class URLCollector:
             Logger.success(f"hakrawler: {len(urls)} URLs")
             return urls
 
+        except subprocess.TimeoutExpired:
+            _tool_log['hakrawler'] = {'status': 'timeout', 'rc': -1, 'elapsed': round(time.time() - _t0, 1)}
+            Logger.warning("hakrawler timed out")
+            return set()
         except Exception as e:
+            _tool_log['hakrawler'] = {'status': 'error', 'rc': -1, 'elapsed': round(time.time() - _t0, 1), 'msg': str(e)}
             Logger.error(f"Error in hakrawler: {e}")
             return set()
 
@@ -1826,8 +1833,13 @@ class JSAnalyzer:
 
             Logger.success(f"subjs: {len(js_urls)} JS files")
             return js_urls
-            
+
+        except subprocess.TimeoutExpired:
+            _tool_log['subjs'] = {'status': 'timeout', 'rc': -1, 'elapsed': round(time.time() - _t0, 1)}
+            Logger.warning("subjs timed out")
+            return set()
         except Exception as e:
+            _tool_log['subjs'] = {'status': 'error', 'rc': -1, 'elapsed': round(time.time() - _t0, 1), 'msg': str(e)}
             Logger.error(f"Error in subjs: {e}")
             return set()
 
@@ -1868,19 +1880,41 @@ class JSAnalyzer:
             Logger.error(f"Error in jsubfinder: {e}")
             return set()
 
+    def _extract_js_from_urls(self, urls_file: Path) -> Set[str]:
+        """Extract .js file URLs directly from a URL corpus (no HTTP request needed).
+
+        This is the fallback path for API-heavy targets where subjs/getJS find
+        nothing because alive hosts serve JSON instead of HTML.  Any URL in the
+        collected corpus whose path ends with a JS extension is a real JS asset.
+        """
+        if not urls_file.exists():
+            return set()
+        _JS_EXTS = re.compile(r'\.(js|mjs|jsx|ts|tsx|min\.js)(\?|$)', re.IGNORECASE)
+        js_urls: Set[str] = set()
+        try:
+            for line in urls_file.read_text(errors='ignore').splitlines():
+                url = line.strip()
+                if url and _JS_EXTS.search(url):
+                    js_urls.add(url)
+        except Exception:
+            pass
+        return js_urls
+
     def analyze_all(self, alive_file: Path) -> Set[str]:
         """Complete JS analysis"""
         Logger.header("JAVASCRIPT ANALYSIS")
-        
+
         all_js = set()
-        
-        # Collect JS files
+
+        # ── 1. subjs: crawls HTML pages for <script src=...> references ─────
+        # Works best on HTML-serving hosts; returns 0 on pure API/JSON targets
         all_js.update(self.collect_with_subjs(alive_file))
-        
+
+        # ── 2. getJS: similar HTML crawler ───────────────────────────────────
         if ToolChecker.check_tool('getJS'):
             Logger.info("Collecting with getJS...")
             getjs_file = self.output_mgr.get_path('js', 'getjs.txt')
-            
+
             try:
                 _t0 = time.time()
                 result = subprocess.run(
@@ -1898,18 +1932,31 @@ class JSAnalyzer:
                     f.write('\n'.join(sorted(js_urls)) + '\n')
 
                 Logger.success(f"getJS: {len(js_urls)} JS files")
-                
+
             except Exception as e:
                 Logger.error(f"Error in getJS: {e}")
-        
-        # Save all JS files
+
+        # ── 3. URL-corpus extraction (zero HTTP; works for API-heavy targets) ─
+        # Extracts .js URLs directly from urls_clean.txt — any URL whose path
+        # ends in .js/.mjs/.jsx/etc is a JS asset regardless of the page type.
+        urls_clean = self.output_mgr.get_path('urls', 'urls_clean.txt')
+        corpus_js = self._extract_js_from_urls(urls_clean)
+        if corpus_js:
+            corpus_file = self.output_mgr.get_path('js', 'from_urls.txt')
+            corpus_file.write_text('\n'.join(sorted(corpus_js)) + '\n')
+            Logger.success(f"JS from URL corpus: {len(corpus_js)} files")
+        all_js.update(corpus_js)
+
+        # ── Save consolidated JS file list ───────────────────────────────────
         all_js_file = self.output_mgr.get_path('js', 'all_js_files.txt')
         with open(all_js_file, 'w') as f:
             f.write('\n'.join(sorted(all_js)) + '\n')
 
+        Logger.info(f"Total JS files: {len(all_js)} (subjs/getJS crawl + URL corpus extraction)")
+
         if all_js:
             self.download_js_files(all_js)
-        
+
         # Analyze with jsubfinder
         if all_js:
             self.analyze_with_jsubfinder(all_js_file)
