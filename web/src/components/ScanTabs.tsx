@@ -16,6 +16,33 @@ function Badge({ children, className = '', style = {} }: {
   )
 }
 
+/**
+ * Decode a gowitness screenshot filename back to its origin URL.
+ * Always includes the port so callers can show it explicitly.
+ */
+function decodeScreenshotTarget(filename: string): { url: string; port: string } | null {
+  const stem = filename.replace(/\.(png|jpg|jpeg|webp)$/i, '')
+  const scheme = stem.startsWith('https---') ? 'https' : stem.startsWith('http---') ? 'http' : null
+  if (!scheme) return null
+  const rest = stem.slice(scheme.length + 3)
+  const lastDash = rest.lastIndexOf('-')
+  if (lastDash <= 0) return { url: `${scheme}://${rest}`, port: '' }
+  const host = rest.slice(0, lastDash)
+  const port = rest.slice(lastDash + 1)
+  if (!host) return null
+  return { url: `${scheme}://${host}:${port}`, port }
+}
+
+/** Return true if the URL's hostname belongs to the target scan domain. */
+function isTargetHost(url: string, domain: string): boolean {
+  try {
+    const { hostname } = new URL(url)
+    return hostname === domain || hostname.endsWith(`.${domain}`)
+  } catch {
+    return true // unparseable → keep
+  }
+}
+
 function SevBadge({ sev }: { sev: string }) {
   return <Badge className={`sev-${sev}`}>{sev.toUpperCase()}</Badge>
 }
@@ -34,12 +61,12 @@ function SearchInput({ placeholder, onChange }: { placeholder: string; onChange:
       type="text"
       placeholder={placeholder}
       onChange={(e) => onChange(e.target.value)}
-      className="text-sm px-3 py-1.5 rounded-lg outline-none focus:ring-1"
+      className="w-full sm:w-auto text-sm px-3 py-1.5 rounded-lg outline-none focus:ring-1"
       style={{
         background: 'var(--surface-2)',
         border: '1px solid var(--border)',
         color: 'var(--text)',
-        minWidth: 200,
+        minWidth: 0,
       }}
     />
   )
@@ -538,11 +565,11 @@ function VulnsTab({ data }: { data: ScanData }) {
 // ── Tab: Diff ─────────────────────────────────────────────────
 
 function DiffTab({ data }: { data: ScanData }) {
-  const entries = Object.entries(data.diff.files)
+  const entries = Object.entries(data.diff.files).filter(([, diff]) => diff.new.length > 0)
 
   if (entries.length === 0) {
-    return <EmptyState icon="📊" text="No diff data"
-      hint={data.diff.previousScan ? 'No changes since last scan' : 'This may be the first scan for this domain'} />
+    return <EmptyState icon="📊" text="No new changes"
+      hint={data.diff.previousScan ? 'No new items since last scan' : 'This may be the first scan for this domain'} />
   }
 
   const labels: Record<string, string> = {
@@ -566,27 +593,15 @@ function DiffTab({ data }: { data: ScanData }) {
           <div className="px-4 py-3 border-b text-sm font-medium flex items-center gap-2" style={{ borderColor: 'var(--border)', background: 'var(--surface)' }}>
             {labels[fname] || fname}
             {diff.new.length > 0 && <Badge style={{ background: '#052e16', color: '#86efac' }}>+{diff.new.length}</Badge>}
-            {diff.removed.length > 0 && <Badge style={{ background: '#450a0a', color: '#fca5a5' }}>-{diff.removed.length}</Badge>}
           </div>
-          <div className="grid md:grid-cols-2 divide-x" style={{ borderColor: 'var(--border)' }}>
+          <div className="grid" style={{ borderColor: 'var(--border)' }}>
             {diff.new.length > 0 && (
-              <div className="p-4">
+              <div className="p-4" style={{ borderColor: 'var(--border-subtle)' }}>
                 <div className="text-xs font-semibold mb-2" style={{ color: '#4ade80' }}>+ New ({diff.new.length})</div>
                 <div className="overflow-y-auto" style={{ maxHeight: '30vh' }}>
                   {diff.new.map((item, i) => (
                     <div key={i} className="text-xs font-mono py-0.5 border-l-2 pl-2 mb-0.5"
                       style={{ borderColor: '#4ade80', color: '#86efac' }}>{item}</div>
-                  ))}
-                </div>
-              </div>
-            )}
-            {diff.removed.length > 0 && (
-              <div className="p-4">
-                <div className="text-xs font-semibold mb-2" style={{ color: '#f87171' }}>- Removed ({diff.removed.length})</div>
-                <div className="overflow-y-auto" style={{ maxHeight: '30vh' }}>
-                  {diff.removed.map((item, i) => (
-                    <div key={i} className="text-xs font-mono py-0.5 border-l-2 pl-2 mb-0.5"
-                      style={{ borderColor: '#f87171', color: '#fca5a5' }}>{item}</div>
                   ))}
                 </div>
               </div>
@@ -601,31 +616,48 @@ function DiffTab({ data }: { data: ScanData }) {
 // ── Tab: Screenshots ──────────────────────────────────────────
 
 function ScreenshotsTab({ data }: { data: ScanData }) {
-  if (data.screenshots.length === 0) {
+  // Filter out screenshots that don't belong to the target domain
+  // (gowitness sometimes follows links to external sites like google.com)
+  const screenshots = data.screenshots.filter((img) => {
+    const decoded = decodeScreenshotTarget(img)
+    if (!decoded) return true // keep undecodable filenames
+    return isTargetHost(decoded.url, data.domain)
+  })
+
+  if (screenshots.length === 0) {
     return <EmptyState icon="📸" text="No screenshots" hint="Screenshots are captured with gowitness during the scan" />
   }
 
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-      {data.screenshots.map((img) => (
-        <a key={img} href={`/api/scan/${data.id}/screenshot/${img}`} target="_blank" rel="noopener"
-          className="group rounded-lg overflow-hidden transition-transform hover:scale-[1.02]"
-          style={{ border: '1px solid var(--border)' }}>
-          <Image
-            src={`/api/scan/${data.id}/screenshot/${img}`}
-            alt={img}
-            width={640}
-            height={360}
-            unoptimized
-            className="w-full h-36 object-cover"
-            loading="lazy"
-          />
-          <div className="px-2 py-1.5 text-xs font-mono truncate group-hover:text-white transition-colors"
-            style={{ background: 'var(--surface)', color: 'var(--text-muted)' }}>
-            {img.replace(/\.(png|jpg|jpeg|webp)$/i, '')}
+      {screenshots.map((img) => {
+        const decoded = decodeScreenshotTarget(img)
+        return (
+          <div key={img}
+            className="group rounded-xl overflow-hidden transition-transform hover:scale-[1.02]"
+            style={{ border: '1px solid var(--border)', background: 'var(--surface)' }}>
+            {/* image — clicking opens full-size in new tab */}
+            <a href={`/api/scan/${data.id}/screenshot/${img}`} target="_blank" rel="noopener">
+              <Image
+                src={`/api/scan/${data.id}/screenshot/${img}`}
+                alt={img}
+                width={640}
+                height={360}
+                unoptimized
+                className="w-full h-36 object-cover"
+                loading="lazy"
+              />
+            </a>
+            {/* caption — URL with port, plain text, no link */}
+            <div className="px-2 py-2 text-xs font-mono"
+              style={{ background: 'var(--surface)', color: 'var(--text-muted)' }}>
+              <div className="truncate" title={decoded?.url ?? img}>
+                {decoded?.url ?? img.replace(/\.(png|jpg|jpeg|webp)$/i, '')}
+              </div>
+            </div>
           </div>
-        </a>
-      ))}
+        )
+      })}
     </div>
   )
 }
@@ -638,6 +670,7 @@ function ToolsTab({ data }: { data: ScanData }) {
   const [logLoading, setLogLoading] = useState(false)
 
   const entries = Object.entries(data.toolLogs).sort((a, b) => a[0].localeCompare(b[0]))
+  const selectedIndex = selectedTool ? entries.findIndex(([tool]) => tool === selectedTool) : -1
 
   if (entries.length === 0) {
     return <EmptyState icon="🔧" text="No tool log data" hint="execution_summary.json is written at scan end — older scans won't have this" />
@@ -662,6 +695,11 @@ function ToolsTab({ data }: { data: ScanData }) {
     } finally {
       setLogLoading(false)
     }
+  }
+
+  async function openLogByIndex(index: number) {
+    if (index < 0 || index >= entries.length) return
+    await openLog(entries[index][0])
   }
 
   function statusColor(status: string): string {
@@ -764,21 +802,61 @@ function ToolsTab({ data }: { data: ScanData }) {
         >
           <div
             className="rounded-xl flex flex-col w-full max-w-3xl"
-            style={{ background: 'var(--surface)', border: '1px solid var(--border)', maxHeight: '80vh' }}
+            style={{ background: 'var(--surface)', border: '1px solid var(--border)', maxHeight: '80vh', boxShadow: 'var(--glow-purple)' }}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between px-5 py-3 border-b" style={{ borderColor: 'var(--border)' }}>
-              <div>
-                <span className="font-mono font-semibold text-sm" style={{ color: 'var(--cyan)' }}>{selectedTool}</span>
-                <span className="text-xs ml-3" style={{ color: 'var(--text-muted)' }}>output log</span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={selectedIndex <= 0}
+                  onClick={() => void openLogByIndex(selectedIndex - 1)}
+                  className="px-2 py-1 rounded text-xs"
+                  style={{ background: 'var(--surface-2)', color: selectedIndex <= 0 ? 'var(--text-subtle)' : 'var(--purple-bright)', border: '1px solid var(--border)' }}
+                >
+                  ←
+                </button>
+                <div>
+                  <span className="font-mono font-semibold text-sm" style={{ color: 'var(--cyan)' }}>{selectedTool}</span>
+                  <span className="text-xs ml-3" style={{ color: 'var(--text-muted)' }}>output log {selectedIndex >= 0 ? `${selectedIndex + 1}/${entries.length}` : ''}</span>
+                </div>
+                <button
+                  type="button"
+                  disabled={selectedIndex < 0 || selectedIndex >= entries.length - 1}
+                  onClick={() => void openLogByIndex(selectedIndex + 1)}
+                  className="px-2 py-1 rounded text-xs"
+                  style={{ background: 'var(--surface-2)', color: selectedIndex < 0 || selectedIndex >= entries.length - 1 ? 'var(--text-subtle)' : 'var(--purple-bright)', border: '1px solid var(--border)' }}
+                >
+                  →
+                </button>
               </div>
-              <button
-                onClick={() => setSelectedTool(null)}
-                className="text-sm px-3 py-1 rounded"
-                style={{ background: 'var(--surface-2)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}
-              >
-                Fechar
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void openLogByIndex(selectedIndex - 1)}
+                  disabled={selectedIndex <= 0}
+                  className="text-xs px-3 py-1 rounded"
+                  style={{ background: 'var(--surface-2)', color: selectedIndex <= 0 ? 'var(--text-subtle)' : 'var(--text)', border: '1px solid var(--border)' }}
+                >
+                  prev
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void openLogByIndex(selectedIndex + 1)}
+                  disabled={selectedIndex < 0 || selectedIndex >= entries.length - 1}
+                  className="text-xs px-3 py-1 rounded"
+                  style={{ background: 'var(--surface-2)', color: selectedIndex < 0 || selectedIndex >= entries.length - 1 ? 'var(--text-subtle)' : 'var(--text)', border: '1px solid var(--border)' }}
+                >
+                  next
+                </button>
+                <button
+                  onClick={() => setSelectedTool(null)}
+                  className="text-sm px-3 py-1 rounded"
+                  style={{ background: 'var(--surface-2)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}
+                >
+                  Fechar
+                </button>
+              </div>
             </div>
             <div className="overflow-auto p-4 flex-1" style={{ fontFamily: 'monospace' }}>
               {logLoading ? (
