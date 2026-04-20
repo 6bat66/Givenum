@@ -684,13 +684,14 @@ function ToolsTab({ data }: { data: ScanData }) {
 
   function toolCounters(info: import('@/lib/types').ToolLogEntry): string {
     const parts: string[] = []
-    if (info.found !== undefined)     parts.push(`${info.found} found`)
-    if (info.urls !== undefined)      parts.push(`${info.urls} urls`)
+    if (info.found !== undefined)      parts.push(`${info.found} found`)
+    if (info.urls !== undefined)       parts.push(`${info.urls} urls`)
     if (info.discovered !== undefined) parts.push(`${info.discovered} discovered`)
-    if (info.findings !== undefined)  parts.push(`${info.findings} findings`)
-    if (info.hosts !== undefined)     parts.push(`${info.hosts} hosts`)
+    if (info.findings !== undefined)   parts.push(`${info.findings} findings`)
+    if (info.hosts !== undefined)      parts.push(`${info.hosts} hosts`)
     if (info.timeouts !== undefined && info.timeouts > 0)  parts.push(`${info.timeouts} timeouts`)
     if (info.failures !== undefined && info.failures > 0)  parts.push(`${info.failures} failures`)
+    if (info.skipped  !== undefined && info.skipped  > 0)  parts.push(`${info.skipped} skipped (budget)`)
     return parts.join(' · ')
   }
 

@@ -55,6 +55,7 @@ export interface ToolLogEntry {
   hosts?: number
   timeouts?: number
   failures?: number
+  skipped?: number
   urls?: number
   discovered?: number
   findings?: number

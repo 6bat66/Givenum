@@ -18,6 +18,16 @@ services:
     ports:
       - "${APP_PORT:-3000}:3000"
     restart: unless-stopped
+    # Give the container unrestricted access to host CPU and memory.
+    # Scans are CPU/network bound — more resources = faster, less waiting.
+    deploy:
+      resources:
+        limits:
+          cpus: '0'       # 0 = unlimited (use all host cores)
+          memory: '0'     # 0 = unlimited
+        reservations:
+          cpus: '2'
+          memory: 512M
 
   # Optional CLI access using the same image
   # Run: docker compose run --rm scanner -d example.com --active
@@ -28,3 +38,8 @@ services:
       - ${HOME}/.config/givenum:/root/.config/givenum
     entrypoint: ["/app/docker-entrypoint.sh", "scan"]
     command: ["--help"]
+    deploy:
+      resources:
+        limits:
+          cpus: '0'
+          memory: '0'

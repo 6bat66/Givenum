@@ -15,6 +15,7 @@ import time
 import platform
 import requests
 import re
+import threading
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Optional, Set, Tuple
@@ -24,6 +25,10 @@ import shutil
 import hashlib
 import socket
 import dns.resolver
+
+# ── CPU awareness ─────────────────────────────────────────────────────────────
+# Used to scale tool thread counts to available hardware automatically.
+_CPU_COUNT: int = os.cpu_count() or 2
 
 # Realistic browser User-Agent to avoid blocks on passive scans
 USER_AGENT = (
@@ -546,8 +551,9 @@ class SubdomainEnum:
         self.domain = domain
         self.output_mgr = output_mgr
         self.api_config = api_config
+        _sf_threads = min(20, max(10, _CPU_COUNT * 2))
         self.tools = {
-            'subfinder': ['subfinder', '-d', domain, '-all', '-silent'],
+            'subfinder': ['subfinder', '-d', domain, '-all', '-silent', '-t', str(_sf_threads)],
             'assetfinder': ['assetfinder', '--subs-only', domain],
             'findomain': ['findomain', '-t', domain, '-q'],
             'amass': ['amass', 'enum', '-passive', '-d', domain, '-silent', '-timeout', '8'],
@@ -577,6 +583,9 @@ class SubdomainEnum:
             with open(output_file, 'w') as f:
                 f.write('\n'.join(sorted(subs)) + '\n')
 
+            # Patch found count into existing log entry set by _track_captured
+            if tool_name in _tool_log:
+                _tool_log[tool_name]['found'] = len(subs)
             if result.returncode == 0:
                 Logger.success(f"{tool_name}: {len(subs)} subdomains")
             else:
@@ -685,27 +694,35 @@ class SubdomainEnum:
 
         all_subs = set()
 
-        # Traditional tools with parallel execution
-        with ThreadPoolExecutor(max_workers=3) as executor:
-            futures = {}
-            for name, cmd in self.tools.items():
-                if cmd:
-                    futures[executor.submit(self.run_tool, name, cmd)] = name
-
-            for future in as_completed(futures):
-                subs = future.result()
-                all_subs.update(subs)
-
-        # Certificate Transparency
+        # Traditional tools + CT + passive APIs all in parallel
         ct = CertificateTransparency(self.domain, self.output_mgr)
-        all_subs.update(ct.query_crtsh())
-        all_subs.update(ct.query_certspotter(self.api_config.get_key('certspotter')))
-
-        # Passive APIs
         apis = PassiveAPIs(self.domain, self.output_mgr, self.api_config)
-        all_subs.update(apis.query_virustotal())
-        all_subs.update(apis.query_alienvault())
-        all_subs.update(apis.query_securitytrails())
+
+        enum_tasks: list[tuple[str, any]] = [
+            *[(name, (self.run_tool, name, cmd)) for name, cmd in self.tools.items() if cmd],
+            ('crtsh',         (ct.query_crtsh,)),
+            ('certspotter',   (ct.query_certspotter, self.api_config.get_key('certspotter'))),
+            ('alienvault',    (apis.query_alienvault,)),
+            ('virustotal',    (apis.query_virustotal,)),
+            ('securitytrails',(apis.query_securitytrails,)),
+        ]
+
+        _workers = min(len(enum_tasks), max(5, _CPU_COUNT))
+        Logger.info(f"Subdomain enumeration: {len(enum_tasks)} sources in parallel (workers={_workers})")
+
+        def _run_task(task):
+            fn, *args = task
+            return fn(*args)
+
+        with ThreadPoolExecutor(max_workers=_workers) as executor:
+            futures = {executor.submit(_run_task, t): name for name, t in enum_tasks}
+            for future in as_completed(futures):
+                try:
+                    subs = future.result()
+                    if subs:
+                        all_subs.update(subs)
+                except Exception as e:
+                    Logger.warning(f"Enum task {futures[future]} error: {e}")
 
         # Uncover — multi-engine OSINT (Shodan, Censys, Fofa, Hunter, Netlas)
         all_subs.update(self._discover_with_uncover())
@@ -998,6 +1015,7 @@ class HTTPProber:
         json_file = self.output_mgr.get_path('http', 'httpx_full.json')
 
         try:
+            _httpx_threads = min(100, max(50, _CPU_COUNT * 8))
             cmd = [
                 'httpx',
                 '-l', str(input_file),
@@ -1010,8 +1028,9 @@ class HTTPProber:
                 '-cname',
                 '-content-length',
                 '-web-server',
-                '-rate-limit', '100',
-                '-retries', '2',
+                '-rate-limit', str(min(300, _CPU_COUNT * 25)),
+                '-threads', str(_httpx_threads),
+                '-retries', '1',
                 '-json',
                 '-o', str(json_file)
             ]
@@ -1172,7 +1191,11 @@ class URLCollector:
         Logger.info("Collecting URLs with xurlfind3r...")
         output_file = self.output_mgr.get_path('urls', 'xurlfind3r.txt')
         log_file = self.output_mgr.get_path('logs', 'xurlfind3r.log')
-        
+
+        # Total wall-clock budget — prevents 30 hosts × 90 s/host = 2700 s worst case.
+        # Once budget is exhausted, remaining hosts are skipped and status → partial.
+        _TOTAL_BUDGET = 600   # seconds
+
         try:
             domains = self._load_hosts(input_file, limit=30)
             if not domains:
@@ -1186,14 +1209,24 @@ class URLCollector:
             _t0 = time.time()
             timeouts = 0
             failures = 0
+            skipped = 0
 
             for idx, domain in enumerate(domains, start=1):
+                # Bail out early if total budget exceeded
+                if time.time() - _t0 > _TOTAL_BUDGET:
+                    skipped = len(domains) - idx + 1
+                    Logger.warning(
+                        f"xurlfind3r: budget {_TOTAL_BUDGET}s reached at host {idx}/{len(domains)} "
+                        f"— skipping {skipped} remaining hosts"
+                    )
+                    break
+
                 try:
                     result = subprocess.run(
                         ['xurlfind3r', '-d', domain, '--silent'],
                         capture_output=True,
                         text=True,
-                        timeout=90
+                        timeout=45   # tighter per-host timeout (was 90s)
                     )
                     self._append_log(log_file, f"{domain} (rc={result.returncode})", result.stderr)
 
@@ -1216,7 +1249,11 @@ class URLCollector:
                     self._append_log(log_file, f"{domain} (error)", str(e))
                     Logger.warning(f"xurlfind3r error on {domain}: {e}")
 
-            status, rc = self._summarize_batch_status(len(domains), failures, timeouts)
+            # Force partial if budget was hit or many hosts failed
+            processed = len(domains) - skipped
+            status, rc = self._summarize_batch_status(processed, failures, timeouts)
+            if skipped > 0:
+                status = 'partial'
             _tool_log['xurlfind3r'] = {
                 'status': status,
                 'rc': rc,
@@ -1224,6 +1261,8 @@ class URLCollector:
                 'hosts': len(domains),
                 'timeouts': timeouts,
                 'failures': failures,
+                'skipped': skipped,
+                'urls': len(all_urls),
             }
 
             with open(output_file, 'w') as f:
@@ -1231,10 +1270,10 @@ class URLCollector:
 
             Logger.success(
                 f"xurlfind3r: {len(all_urls)} URLs "
-                f"(hosts={len(domains)}, timeouts={timeouts}, failures={failures})"
+                f"(hosts={len(domains)}, timeouts={timeouts}, skipped={skipped})"
             )
             return all_urls
-            
+
         except Exception as e:
             _tool_log['xurlfind3r'] = {'status': 'error', 'rc': -1, 'elapsed': 0, 'msg': str(e)}
             Logger.error(f"Error in xurlfind3r: {e}")
@@ -1256,17 +1295,26 @@ class URLCollector:
             if not hosts:
                 return set()
 
+            _KATANA_BUDGET = 600  # total wall-clock budget across all hosts
+            _katana_rl = min(500, max(200, _CPU_COUNT * 30))
             all_urls = set()
             katana_timeouts = 0
             katana_failures = 0
+            katana_skipped = 0
+            _kt0 = time.time()
+
             for idx, host in enumerate(hosts[:50], start=1):
+                if time.time() - _kt0 > _KATANA_BUDGET:
+                    katana_skipped = len(hosts[:50]) - idx + 1
+                    Logger.warning(f"katana: budget {_KATANA_BUDGET}s reached at host {idx} — skipping {katana_skipped}")
+                    break
                 try:
                     result = subprocess.run(
                         ['katana', '-u', host, '-silent', '-depth', '2', '-jc',
-                         '-timeout', '10', '-rate-limit', '150'],
+                         '-timeout', '10', '-rate-limit', str(_katana_rl), '-c', str(min(20, _CPU_COUNT * 2))],
                         capture_output=True,
                         text=True,
-                        timeout=90
+                        timeout=60   # tighter per-host timeout (was 90s)
                     )
                     self._append_log(log_file, f"{host} (rc={result.returncode})", result.stderr)
                     if result.returncode != 0:
@@ -1283,9 +1331,16 @@ class URLCollector:
                     katana_failures += 1
                     self._append_log(log_file, f"{host} (error)", str(e))
 
-            total = min(len(hosts), 50)
+            total = min(len(hosts), 50) - katana_skipped
             status, rc = self._summarize_batch_status(total, katana_failures, katana_timeouts)
-            _tool_log['katana'] = {'status': status, 'rc': rc, 'elapsed': round(time.time() - _t0, 1), 'urls': len(all_urls), 'timeouts': katana_timeouts, 'failures': katana_failures}
+            if katana_skipped > 0:
+                status = 'partial'
+            _tool_log['katana'] = {
+                'status': status, 'rc': rc,
+                'elapsed': round(time.time() - _t0, 1),
+                'urls': len(all_urls), 'timeouts': katana_timeouts,
+                'failures': katana_failures, 'skipped': katana_skipped,
+            }
 
             with open(output_file, 'w') as f:
                 f.write('\n'.join(sorted(all_urls)) + '\n')
@@ -1299,19 +1354,30 @@ class URLCollector:
             return set()
 
     def collect_from_archives(self, input_file: Path) -> Set[str]:
-        """Collect URLs from web archives"""
+        """Collect URLs from web archives — all crawlers run in parallel."""
         Logger.header("URL COLLECTION")
 
         all_urls = set()
+        _url_lock = threading.Lock()
 
-        # xurlfind3r (primary)
-        all_urls.update(self.collect_with_xurlfind3r(input_file))
+        # Run all crawlers concurrently (each has its own internal budget cap)
+        _crawlers = [
+            ('xurlfind3r', self.collect_with_xurlfind3r, input_file),
+            ('katana',     self.collect_with_katana,     input_file),
+            ('hakrawler',  self.collect_with_hakrawler,  input_file),
+        ]
 
-        # katana (active crawler)
-        all_urls.update(self.collect_with_katana(input_file))
-
-        # hakrawler (crawl-based)
-        all_urls.update(self.collect_with_hakrawler(input_file))
+        Logger.info(f"Launching {len(_crawlers)} URL crawlers in parallel...")
+        with ThreadPoolExecutor(max_workers=len(_crawlers)) as executor:
+            futures = {executor.submit(fn, arg): name for name, fn, arg in _crawlers}
+            for future in as_completed(futures):
+                try:
+                    urls = future.result()
+                    with _url_lock:
+                        all_urls.update(urls)
+                    Logger.info(f"Crawler '{futures[future]}' done: {len(urls)} URLs")
+                except Exception as e:
+                    Logger.warning(f"Crawler '{futures[future]}' error: {e}")
 
         # GAU — run only on root domain + www to avoid per-subdomain archive explosion
         # (gau takes 3+ min per domain; running on all 200 subdomains would never finish)
@@ -2178,11 +2244,16 @@ class VulnScanner:
             run_logged('nuclei_update', ['nuclei', '-update-templates'],
                        self.output_mgr.dirs['logs'], timeout=300)
 
+            _nuclei_c = min(100, max(25, _CPU_COUNT * 8))
+            _nuclei_rl = min(500, max(150, _CPU_COUNT * 20))
             cmd = [
                 'nuclei',
                 '-l', str(input_file),
                 '-severity', severity,
                 '-silent',
+                '-c', str(_nuclei_c),         # parallel template execution
+                '-rate-limit', str(_nuclei_rl),
+                '-bulk-size', str(min(50, _CPU_COUNT * 4)),
                 '-jsonl-export', str(json_file)
             ]
 
