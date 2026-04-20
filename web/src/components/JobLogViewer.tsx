@@ -372,186 +372,162 @@ export default function JobLogViewer({ initialJob, initialLog }: Props) {
     }
   }
 
-  const statusStyle = job.status === 'completed'
-    ? { background: '#052e16', color: '#86efac' }
-    : job.status === 'failed'
-      ? { background: '#450a0a', color: '#fca5a5' }
-      : job.status === 'stopped'
-        ? { background: '#1c1917', color: '#a8a29e' }
-        : job.status === 'paused'
-          ? { background: '#1c1917', color: '#fde047' }
-          : { background: '#082f49', color: '#7dd3fc' }
-
   const cursor = !isFinished && !isPaused ? '<span style="color:#86efac">▌</span>' : ''
 
   const showProgressBar = (isActive || isPaused) && job.status !== 'queued'
 
+  const btnBase = {
+    fontFamily: 'inherit',
+    fontSize: '11px',
+    padding: '4px 10px',
+    borderRadius: 'var(--radius)',
+    cursor: 'pointer',
+    border: '1px solid var(--border)',
+  } as const
+
   return (
-    <div className="space-y-4">
-      <div className="rounded-xl p-5" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-        <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
-          <div>
-            <div className="text-lg font-semibold" style={{ color: 'var(--text)' }}>{job.domain}</div>
-            <div className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
-              {job.projectName} · {job.mode}
-            </div>
-          </div>
-          <span className="text-xs px-2 py-1 rounded-full font-medium" style={statusStyle}>
+    <div className="space-y-3">
+      {/* ── job meta bar ───────────────────────────────────────────── */}
+      <div
+        style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
+
+        {/* header row */}
+        <div className="flex flex-wrap items-center gap-3 px-4 py-2.5 border-b"
+          style={{ borderColor: 'var(--border)', fontSize: '12px' }}>
+          <span style={{ color: 'var(--green)', fontWeight: 600 }}>{job.domain}</span>
+          <span style={{ color: 'var(--text-muted)' }}>{job.projectName} · {job.mode}</span>
+          <span
+            className={`status-${job.status}`}
+            style={{ padding: '1px 6px', borderRadius: 'var(--radius)', fontSize: '11px', marginLeft: 'auto' }}>
             {job.status}
           </span>
         </div>
 
+        {/* progress bar */}
         {showProgressBar && (
-          <div className="mb-4">
-            <div className="flex items-center justify-between text-xs mb-1.5" style={{ color: 'var(--text-muted)' }}>
+          <div className="px-4 py-2 border-b" style={{ borderColor: 'var(--border)' }}>
+            <div className="flex items-center justify-between mb-1" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
               <span>{progressPhase}</span>
-              <span className="font-mono">{progressPct}%</span>
+              <span>{progressPct}%</span>
             </div>
-            <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--surface-2)' }}>
-              <div
-                className="h-full rounded-full transition-all duration-500"
-                style={{
-                  width: `${progressPct}%`,
-                  background: isPaused ? '#ca8a04' : 'linear-gradient(90deg, #0ea5e9, #22d3ee)',
-                }}
-              />
+            <div style={{ height: '2px', background: 'var(--surface-2)', borderRadius: '1px', overflow: 'hidden' }}>
+              <div style={{
+                height: '100%',
+                width: `${progressPct}%`,
+                background: isPaused ? '#ca8a04' : 'var(--green)',
+                transition: 'width 500ms ease',
+              }} />
             </div>
           </div>
         )}
 
-        <div className="grid sm:grid-cols-2 xl:grid-cols-5 gap-3 text-xs" style={{ color: 'var(--text-muted)' }}>
-          <div>criado: <span className="font-mono">{formatTimestamp(job.createdAt)}</span></div>
-          <div>iniciado: <span className="font-mono">{formatTimestamp(job.startedAt)}</span></div>
-          <div>finalizado: <span className="font-mono">{formatTimestamp(job.endedAt)}</span></div>
-          <div>atualizado: <span className="font-mono">{formatTimestamp(updatedAt)}</span></div>
-          <div>rc: <span className="font-mono">{job.returnCode ?? 'running'}</span></div>
+        {/* timestamps */}
+        <div className="flex flex-wrap gap-4 px-4 py-2 border-b" style={{ borderColor: 'var(--border)', fontSize: '11px', color: 'var(--text-muted)' }}>
+          <span>created <span style={{ color: 'var(--text)' }}>{formatTimestamp(job.createdAt)}</span></span>
+          <span>started  <span style={{ color: 'var(--text)' }}>{formatTimestamp(job.startedAt)}</span></span>
+          <span>ended    <span style={{ color: 'var(--text)' }}>{formatTimestamp(job.endedAt)}</span></span>
+          <span>updated  <span style={{ color: 'var(--text)' }}>{formatTimestamp(updatedAt)}</span></span>
+          <span>rc <span style={{ color: job.returnCode === 0 ? 'var(--green)' : job.returnCode != null ? 'var(--red)' : 'var(--text)' }}>
+            {job.returnCode ?? '—'}
+          </span></span>
         </div>
 
-        <div className="flex flex-wrap gap-3 mt-4 text-sm">
-          <button
-            type="button"
-            onClick={() => void refresh()}
-            className="px-3 py-2 rounded-lg"
-            style={{ background: 'var(--surface-2)', color: 'var(--text)', border: '1px solid var(--border)' }}>
-            {loading ? 'Atualizando...' : 'Atualizar'}
+        {/* actions */}
+        <div className="flex flex-wrap gap-2 px-4 py-2.5" style={{ fontSize: '11px' }}>
+          <button type="button" onClick={() => void refresh()}
+            style={{ ...btnBase, background: 'var(--surface-2)', color: 'var(--text)' }}>
+            {loading ? '...' : 'refresh'}
           </button>
-          <button
-            type="button"
-            onClick={() => {
-              setFollow(true)
-              if (terminalRef.current) {
-                terminalRef.current.scrollTop = terminalRef.current.scrollHeight
-              }
-            }}
-            className="px-3 py-2 rounded-lg"
-            style={{ background: follow ? '#0f766e' : 'var(--surface-2)', color: follow ? '#ecfeff' : 'var(--text)', border: '1px solid var(--border)' }}>
-            {follow ? 'Seguindo saída' : 'Seguir saída'}
+          <button type="button"
+            onClick={() => { setFollow(true); if (terminalRef.current) terminalRef.current.scrollTop = terminalRef.current.scrollHeight }}
+            style={{ ...btnBase, background: follow ? '#134e4a' : 'var(--surface-2)', color: follow ? '#99f6e4' : 'var(--text-muted)' }}>
+            {follow ? '↓ following' : '↓ follow'}
           </button>
 
           {isActive && (
             <>
-              <button
-                type="button"
-                disabled={actionLoading !== null}
+              <button type="button" disabled={actionLoading !== null}
                 onClick={() => void handleAction('pause')}
-                className="px-3 py-2 rounded-lg"
-                style={{ background: '#422006', color: '#fde047', border: '1px solid #713f12', opacity: actionLoading ? 0.6 : 1 }}>
-                {actionLoading === 'pause' ? 'Pausando...' : 'Pausar'}
+                style={{ ...btnBase, background: '#42200633', color: 'var(--yellow)', borderColor: '#71331244', opacity: actionLoading ? 0.6 : 1 }}>
+                {actionLoading === 'pause' ? '...' : 'pause'}
               </button>
-              <button
-                type="button"
-                disabled={actionLoading !== null}
+              <button type="button" disabled={actionLoading !== null}
                 onClick={() => void handleAction('stop')}
-                className="px-3 py-2 rounded-lg"
-                style={{ background: '#450a0a', color: '#fca5a5', border: '1px solid #7f1d1d', opacity: actionLoading ? 0.6 : 1 }}>
-                {actionLoading === 'stop' ? 'Parando...' : 'Parar'}
+                style={{ ...btnBase, background: '#450a0a33', color: 'var(--red)', borderColor: '#7f1d1d44', opacity: actionLoading ? 0.6 : 1 }}>
+                {actionLoading === 'stop' ? '...' : 'stop'}
               </button>
             </>
           )}
 
           {isPaused && (
             <>
-              <button
-                type="button"
-                disabled={actionLoading !== null}
+              <button type="button" disabled={actionLoading !== null}
                 onClick={() => void handleAction('resume')}
-                className="px-3 py-2 rounded-lg"
-                style={{ background: '#052e16', color: '#86efac', border: '1px solid #14532d', opacity: actionLoading ? 0.6 : 1 }}>
-                {actionLoading === 'resume' ? 'Retomando...' : 'Retomar'}
+                style={{ ...btnBase, background: '#052e1633', color: 'var(--green)', borderColor: '#14532d44', opacity: actionLoading ? 0.6 : 1 }}>
+                {actionLoading === 'resume' ? '...' : 'resume'}
               </button>
-              <button
-                type="button"
-                disabled={actionLoading !== null}
+              <button type="button" disabled={actionLoading !== null}
                 onClick={() => void handleAction('stop')}
-                className="px-3 py-2 rounded-lg"
-                style={{ background: '#450a0a', color: '#fca5a5', border: '1px solid #7f1d1d', opacity: actionLoading ? 0.6 : 1 }}>
-                {actionLoading === 'stop' ? 'Parando...' : 'Parar'}
+                style={{ ...btnBase, background: '#450a0a33', color: 'var(--red)', borderColor: '#7f1d1d44', opacity: actionLoading ? 0.6 : 1 }}>
+                {actionLoading === 'stop' ? '...' : 'stop'}
               </button>
             </>
           )}
 
-          <Link
-            href={`/api/jobs/${job.id}/log`}
-            target="_blank"
-            className="px-3 py-2 rounded-lg"
-            style={{ background: 'var(--surface-2)', color: 'var(--cyan)', border: '1px solid var(--border)' }}>
-            Log bruto
+          <Link href={`/api/jobs/${job.id}/log`} target="_blank"
+            style={{ ...btnBase, background: 'var(--surface-2)', color: 'var(--cyan)', display: 'inline-flex', alignItems: 'center' }}>
+            raw log
           </Link>
           {job.scanId && (
-            <Link
-              href={`/scan/${job.scanId}`}
-              className="px-3 py-2 rounded-lg"
-              style={{ background: 'var(--surface-2)', color: 'var(--green)', border: '1px solid var(--border)' }}>
-              Abrir scan
+            <Link href={`/scan/${job.scanId}`}
+              style={{ ...btnBase, background: 'var(--surface-2)', color: 'var(--green)', display: 'inline-flex', alignItems: 'center' }}>
+              open scan ›
             </Link>
           )}
         </div>
       </div>
 
       {truncated && (
-        <div className="rounded-xl px-4 py-3 text-sm" style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>
-          Exibindo só a parte final do log para manter a UI fluida.
+        <div className="px-4 py-2" style={{ fontSize: '11px', color: 'var(--text-muted)', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
+          [INF] showing tail of log only — file is large
         </div>
       )}
 
       {error && (
-        <div className="rounded-xl px-4 py-3 text-sm" style={{ background: '#450a0a', border: '1px solid #7f1d1d', color: '#fecaca' }}>
-          {error}
+        <div className="px-4 py-2" style={{ fontSize: '12px', color: 'var(--red)', background: '#450a0a33', border: '1px solid #7f1d1d44', borderRadius: 'var(--radius)' }}>
+          [ERR] {error}
         </div>
       )}
 
-      <div className="rounded-xl overflow-hidden" style={{ background: '#06080d', border: '1px solid #1f2937', boxShadow: '0 24px 60px rgba(0, 0, 0, 0.35)' }}>
-        <div className="flex items-center justify-between gap-3 px-4 py-3 border-b" style={{ borderColor: '#111827', background: '#0b1220' }}>
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="block h-3 w-3 rounded-full" style={{ background: '#f87171' }} />
-              <span className="block h-3 w-3 rounded-full" style={{ background: '#facc15' }} />
-              <span className="block h-3 w-3 rounded-full" style={{ background: '#4ade80' }} />
-            </div>
-            <div className="text-xs font-mono truncate" style={{ color: '#cbd5e1' }}>
-              job/{job.id.slice(0, 8)}.log
-            </div>
-          </div>
-          <div className="text-xs font-mono" style={{ color: isFinished ? '#94a3b8' : isPaused ? '#fde047' : '#86efac' }}>
-            {isFinished ? 'finalizado' : isPaused ? 'pausado' : 'streaming'}
+      <div style={{ border: '1px solid #1a1f2e', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
+        {/* terminal title bar */}
+        <div className="flex items-center justify-between px-4 py-2 border-b"
+          style={{ borderColor: '#1a1f2e', background: '#0d1117', fontSize: '11px' }}>
+          <span style={{ color: '#4b5563' }}>❯ givenum scan</span>
+          <div className="flex items-center gap-3">
+            <span style={{ color: '#4b5563' }}>job/{job.id.slice(0, 8)}</span>
+            <span style={{
+              color: isFinished ? '#6b7280' : isPaused ? 'var(--yellow)' : 'var(--green)',
+              fontWeight: 600,
+            }}>
+              {isFinished ? '■ done' : isPaused ? '⏸ paused' : '● streaming'}
+            </span>
           </div>
         </div>
 
+        {/* log output */}
         <div
           ref={terminalRef}
           onScroll={handleTerminalScroll}
-          className="overflow-auto min-h-[420px] max-h-[72vh] p-4"
-          style={{ background: 'linear-gradient(180deg, #050816 0%, #04060b 100%)' }}
+          style={{ overflowY: 'auto', minHeight: '420px', maxHeight: '72vh', padding: '12px 16px', background: '#060810' }}
         >
           <div
-            className="font-mono text-xs leading-6 whitespace-pre-wrap break-words"
-            style={{ color: '#e5e7eb', fontVariantLigatures: 'none' }}
-            dangerouslySetInnerHTML={{ __html: renderedLog || escapeHtml('Aguardando saída do scanner...') + cursor }}
+            style={{ fontFamily: 'inherit', fontSize: '12px', lineHeight: '1.65', whiteSpace: 'pre-wrap', wordBreak: 'break-all', color: '#d1d5db', fontVariantLigatures: 'none' }}
+            dangerouslySetInnerHTML={{ __html: renderedLog || escapeHtml('waiting for scanner output...') + cursor }}
           />
           {renderedLog && !isFinished && !isPaused && (
             <div
-              className="font-mono text-xs leading-6 whitespace-pre-wrap"
-              style={{ color: '#86efac' }}
+              style={{ fontFamily: 'inherit', fontSize: '12px', lineHeight: '1.65', whiteSpace: 'pre-wrap', color: '#4ade80' }}
               dangerouslySetInnerHTML={{ __html: cursor }}
             />
           )}

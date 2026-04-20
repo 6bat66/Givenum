@@ -595,7 +595,8 @@ class SubdomainEnum:
             'subfinder': ['subfinder', '-d', domain, '-all', '-silent', '-t', str(_sf_threads)],
             'assetfinder': ['assetfinder', '--subs-only', domain],
             'findomain': ['findomain', '-t', domain, '-q'],
-            'amass': ['amass', 'enum', '-passive', '-d', domain, '-silent', '-timeout', '8'],
+            # amass has a slow startup and different output conventions per version —
+            # it runs in its own dedicated slot after the parallel pool (see run_amass()).
             'knockpy': ['knockpy', domain, '--silent'] if ToolChecker.check_tool('knockpy') else None
         }
 
@@ -642,6 +643,72 @@ class SubdomainEnum:
             Logger.error(f"Error running {tool_name}: {e}")
 
         return set()
+
+    def run_amass(self) -> Set[str]:
+        """Run amass in its own dedicated slot after the parallel pool.
+
+        amass has two quirks that make it unsuitable for the shared pool:
+          1. Slow startup — it initialises a local DB and multiple data sources
+             before emitting any output, so it always "finishes" last, blocking
+             faster tools from starting.
+          2. Version variance — amass v3 writes to stdout; amass v4 may write
+             only to the local DB or to a `-o` file.  We force `-o` so we always
+             read results from a file rather than stdout.
+        """
+        if not ToolChecker.check_tool('amass'):
+            _tool_log['amass'] = {'status': 'not_found', 'rc': -1, 'elapsed': 0}
+            return set()
+
+        Logger.info("Running amass (passive, dedicated slot — up to 10 min)...")
+        output_file = self.output_mgr.get_path('subdomains', 'amass.txt')
+        _t0 = time.time()
+
+        try:
+            result = subprocess.run(
+                [
+                    'amass', 'enum', '-passive',
+                    '-d', self.domain,
+                    '-o', str(output_file),   # force file output — reliable across all versions
+                    '-timeout', '10',          # amass-internal cap in minutes
+                ],
+                capture_output=True,
+                text=True,
+                timeout=660,  # hard cap: 11 min (1 min headroom over internal timeout)
+            )
+            _track_captured('amass', result, _t0, self.output_mgr.dirs['logs'])
+
+            # Collect from -o file (primary) + stdout fallback
+            subs: Set[str] = set()
+            if output_file.exists():
+                for line in output_file.read_text().splitlines():
+                    sub = line.strip()
+                    if sub and matches_domain(sub, self.domain):
+                        subs.add(sub)
+            for line in result.stdout.splitlines():
+                sub = line.strip()
+                if sub and matches_domain(sub, self.domain):
+                    subs.add(sub)
+
+            if 'amass' in _tool_log:
+                _tool_log['amass']['found'] = len(subs)
+                if result.returncode != 0 and subs:
+                    _tool_log['amass']['status'] = 'partial'
+
+            if subs:
+                Logger.success(f"amass: {len(subs)} subdomains (rc={result.returncode})")
+            else:
+                Logger.warning(f"amass: 0 subdomains (rc={result.returncode}) — check logs/amass.log")
+
+            return subs
+
+        except subprocess.TimeoutExpired:
+            _tool_log['amass'] = {'status': 'timeout', 'rc': -1, 'elapsed': round(time.time() - _t0, 1)}
+            Logger.warning("amass: timeout (10-min budget exhausted)")
+            return set()
+        except Exception as e:
+            _tool_log['amass'] = {'status': 'error', 'rc': -1, 'elapsed': round(time.time() - _t0, 1), 'msg': str(e)}
+            Logger.error(f"amass error: {e}")
+            return set()
 
     def _discover_with_uncover(self) -> Set[str]:
         """Multi-engine OSINT with uncover (Shodan/Censys/Fofa/Hunter/Netlas)"""
@@ -770,6 +837,9 @@ class SubdomainEnum:
 
         # AlienVault — run sequentially after the pool so it doesn't compete for rate limits
         all_subs.update(apis.query_alienvault())
+
+        # amass — dedicated slot after pool: slow startup + version-variant output
+        all_subs.update(self.run_amass())
 
         # Uncover — multi-engine OSINT (Shodan, Censys, Fofa, Hunter, Netlas)
         all_subs.update(self._discover_with_uncover())
