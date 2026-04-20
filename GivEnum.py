@@ -61,43 +61,71 @@ def _api_request(url: str, headers: dict | None = None, timeout: int = 30,
     return None
 
 
-# Colors for output
-class Colors:
-    HEADER = '\033[95m'
-    OKBLUE = '\033[94m'
-    OKCYAN = '\033[96m'
-    OKGREEN = '\033[92m'
-    WARNING = '\033[93m'
-    FAIL = '\033[91m'
-    ENDC = '\033[0m'
-    BOLD = '\033[1m'
-    UNDERLINE = '\033[4m'
-
+# ── ProjectDiscovery-style terminal output ────────────────────────────────────
 
 class Logger:
-    """Custom logging system with colors"""
+    """Thread-safe logger with ProjectDiscovery visual style.
 
-    @staticmethod
-    def info(msg: str):
-        print(f"{Colors.OKBLUE}[*]{Colors.ENDC} {msg}")
+    Prefix palette:
+        [INF] cyan    — informational / progress
+        [FND] green   — findings / success
+        [WRN] yellow  — non-fatal warnings
+        [ERR] red     — errors
+    Section headers use thin unicode rule lines instead of === boxes.
+    """
 
-    @staticmethod
-    def success(msg: str):
-        print(f"{Colors.OKGREEN}[+]{Colors.ENDC} {msg}")
+    _lock = threading.Lock()
 
-    @staticmethod
-    def warning(msg: str):
-        print(f"{Colors.WARNING}[!]{Colors.ENDC} {msg}")
+    # ANSI palette
+    _C_INF  = '\033[36m'   # cyan
+    _C_FND  = '\033[32m'   # green
+    _C_WRN  = '\033[33m'   # yellow
+    _C_ERR  = '\033[31m'   # red
+    _C_DIM  = '\033[2m'    # dim  (separators, decorative)
+    _C_BOLD = '\033[1m'
+    _C_RST  = '\033[0m'
 
-    @staticmethod
-    def error(msg: str):
-        print(f"{Colors.FAIL}[-]{Colors.ENDC} {msg}")
+    @classmethod
+    def _emit(cls, tag: str, color: str, msg: str) -> None:
+        line = f"{color}[{tag}]{cls._C_RST} {msg}"
+        with cls._lock:
+            print(line, flush=True)
 
-    @staticmethod
-    def header(msg: str):
-        print(f"\n{Colors.HEADER}{Colors.BOLD}{'='*60}{Colors.ENDC}")
-        print(f"{Colors.HEADER}{Colors.BOLD}{msg.center(60)}{Colors.ENDC}")
-        print(f"{Colors.HEADER}{Colors.BOLD}{'='*60}{Colors.ENDC}\n")
+    @classmethod
+    def info(cls, msg: str) -> None:
+        cls._emit('INF', cls._C_INF, msg)
+
+    @classmethod
+    def success(cls, msg: str) -> None:
+        cls._emit('FND', cls._C_FND, msg)
+
+    @classmethod
+    def warning(cls, msg: str) -> None:
+        cls._emit('WRN', cls._C_WRN, msg)
+
+    @classmethod
+    def error(cls, msg: str) -> None:
+        cls._emit('ERR', cls._C_ERR, msg)
+
+    @classmethod
+    def header(cls, title: str) -> None:
+        rule = f"{cls._C_DIM}{'─' * 56}{cls._C_RST}"
+        label = f"{cls._C_BOLD}{title}{cls._C_RST}"
+        with cls._lock:
+            print(f"\n{rule}\n {label}\n{rule}\n", flush=True)
+
+
+# Legacy alias — keeps old Colors.* references (e.g. in the banner) working
+class Colors:
+    HEADER   = Logger._C_DIM
+    OKBLUE   = Logger._C_INF
+    OKCYAN   = Logger._C_INF
+    OKGREEN  = Logger._C_FND
+    WARNING  = Logger._C_WRN
+    FAIL     = Logger._C_ERR
+    ENDC     = Logger._C_RST
+    BOLD     = Logger._C_BOLD
+    UNDERLINE = '\033[4m'
 
 
 class APIConfig:
@@ -3597,15 +3625,25 @@ def configure_api_keys():
 
 
 def main():
-    banner = f"""
-{Colors.OKCYAN}{Colors.BOLD}
-╦ ╦┌─┐┌┐ ╔═╗┌┐┌┬ ┬┌┬┐
-║║║├┤ ├┴┐║╣ ││││ ││││
-╚╩╝└─┘└─┘╚═╝┘└┘└─┘┴ ┴
-{Colors.ENDC}
-{Colors.OKGREEN}Modern Web Enumeration Framework{Colors.ENDC}
-{Colors.WARNING}Advanced reconnaissance for security professionals{Colors.ENDC}
-"""
+    _I  = Logger._C_INF
+    _G  = Logger._C_FND
+    _D  = Logger._C_DIM
+    _B  = Logger._C_BOLD
+    _R  = Logger._C_RST
+
+    banner = (
+        f"\n"
+        f"{_I}{_B}"
+        f"  _____ _       ______\n"
+        f" / ___/(_)   __/ ____/___  __  ______ ___\n"
+        f"/ (_ / / /| |/ / __/ / _ \\/ / / / __ `__ \\\n"
+        f"\\___/_/_/ |___/____/_//_/\\__,_/_/ /_/ /_/\n"
+        f"{_R}"
+        f"{_D}                                        v2.0{_R}\n"
+        f"\n"
+        f"  {_G}passive recon · active exploitation · asset discovery{_R}\n"
+        f"  {_D}givenum.io{_R}\n"
+    )
 
     print(banner)
 
