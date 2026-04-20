@@ -381,9 +381,12 @@ class CertificateTransparency:
                 Logger.success(f"crt.sh: {len(domains)} domains")
                 return domains
             else:
-                status_code = response.status_code if response else 0
-                _tool_log['crtsh'] = {'status': 'fail', 'rc': status_code, 'elapsed': round(time.time() - _t0, 1), 'msg': f'HTTP {status_code}'}
-                Logger.warning(f"crt.sh returned HTTP {status_code}")
+                if response is None:
+                    _tool_log['crtsh'] = {'status': 'fail', 'rc': -1, 'elapsed': round(time.time() - _t0, 1), 'msg': 'connection failed'}
+                    Logger.warning("crt.sh: connection failed (all retries exhausted)")
+                else:
+                    _tool_log['crtsh'] = {'status': 'fail', 'rc': response.status_code, 'elapsed': round(time.time() - _t0, 1), 'msg': f'HTTP {response.status_code}'}
+                    Logger.warning(f"crt.sh returned HTTP {response.status_code}")
 
         except Exception as e:
             _tool_log['crtsh'] = {'status': 'error', 'rc': -1, 'elapsed': round(time.time() - _t0, 1), 'msg': str(e)}
@@ -422,8 +425,12 @@ class CertificateTransparency:
                 Logger.success(f"CertSpotter: {len(domains)} domains")
                 return domains
             else:
-                status_code = response.status_code if response else 0
-                _tool_log['certspotter'] = {'status': 'fail', 'rc': status_code, 'elapsed': round(time.time() - _t0, 1), 'msg': f'HTTP {status_code}'}
+                if response is None:
+                    _tool_log['certspotter'] = {'status': 'fail', 'rc': -1, 'elapsed': round(time.time() - _t0, 1), 'msg': 'connection failed'}
+                    Logger.warning("CertSpotter: connection failed (all retries exhausted)")
+                else:
+                    _tool_log['certspotter'] = {'status': 'fail', 'rc': response.status_code, 'elapsed': round(time.time() - _t0, 1), 'msg': f'HTTP {response.status_code}'}
+                    Logger.warning(f"CertSpotter returned HTTP {response.status_code}")
 
         except Exception as e:
             _tool_log['certspotter'] = {'status': 'error', 'rc': -1, 'elapsed': round(time.time() - _t0, 1), 'msg': str(e)}
@@ -522,8 +529,12 @@ class PassiveAPIs:
                 Logger.success(f"AlienVault: {len(domains)} domains")
                 return domains
             else:
-                status_code = response.status_code if response else 0
-                _tool_log['alienvault'] = {'status': 'fail', 'rc': status_code, 'elapsed': round(time.time() - _t0, 1), 'msg': f'HTTP {status_code}'}
+                if response is None:
+                    _tool_log['alienvault'] = {'status': 'fail', 'rc': -1, 'elapsed': round(time.time() - _t0, 1), 'msg': 'connection failed or rate-limited'}
+                    Logger.warning("AlienVault: connection failed or rate-limited (all retries exhausted)")
+                else:
+                    _tool_log['alienvault'] = {'status': 'fail', 'rc': response.status_code, 'elapsed': round(time.time() - _t0, 1), 'msg': f'HTTP {response.status_code}'}
+                    Logger.warning(f"AlienVault returned HTTP {response.status_code}")
 
         except Exception as e:
             _tool_log['alienvault'] = {'status': 'error', 'rc': -1, 'elapsed': round(time.time() - _t0, 1), 'msg': str(e)}
@@ -614,6 +625,10 @@ class SubdomainEnum:
             # Patch found count into existing log entry set by _track_captured
             if tool_name in _tool_log:
                 _tool_log[tool_name]['found'] = len(subs)
+                # Non-zero exit with results → partial (not fail).
+                # amass/findomain often exit rc=1 on network timeouts yet still return data.
+                if result.returncode != 0 and subs:
+                    _tool_log[tool_name]['status'] = 'partial'
             if result.returncode == 0:
                 Logger.success(f"{tool_name}: {len(subs)} subdomains")
             else:
@@ -726,11 +741,12 @@ class SubdomainEnum:
         ct = CertificateTransparency(self.domain, self.output_mgr)
         apis = PassiveAPIs(self.domain, self.output_mgr, self.api_config)
 
+        # AlienVault is rate-limited aggressively — run it after the parallel pool to
+        # avoid 429s from concurrent HTTP traffic across all other sources firing at once.
         enum_tasks: list[tuple[str, any]] = [
             *[(name, (self.run_tool, name, cmd)) for name, cmd in self.tools.items() if cmd],
             ('crtsh',         (ct.query_crtsh,)),
             ('certspotter',   (ct.query_certspotter, self.api_config.get_key('certspotter'))),
-            ('alienvault',    (apis.query_alienvault,)),
             ('virustotal',    (apis.query_virustotal,)),
             ('securitytrails',(apis.query_securitytrails,)),
         ]
@@ -751,6 +767,9 @@ class SubdomainEnum:
                         all_subs.update(subs)
                 except Exception as e:
                     Logger.warning(f"Enum task {futures[future]} error: {e}")
+
+        # AlienVault — run sequentially after the pool so it doesn't compete for rate limits
+        all_subs.update(apis.query_alienvault())
 
         # Uncover — multi-engine OSINT (Shodan, Censys, Fofa, Hunter, Netlas)
         all_subs.update(self._discover_with_uncover())
@@ -1476,6 +1495,8 @@ class URLCollector:
             wayback_file = self.output_mgr.get_path('urls', 'waybackurls.txt')
             wayback_log = self.output_mgr.get_path('logs', 'waybackurls.log')
 
+            _WAYBACK_BUDGET = 300  # 5 min total across all domains
+
             try:
                 root = self.output_mgr.domain
                 archive_targets = list({root, f'www.{root}'})
@@ -1483,14 +1504,22 @@ class URLCollector:
                 urls = set()
                 timeouts = 0
                 failures = 0
+                skipped = 0
                 _t0 = time.time()
                 for idx, domain in enumerate(archive_targets, start=1):
+                    remaining = _WAYBACK_BUDGET - (time.time() - _t0)
+                    if remaining < 30:
+                        skipped += 1
+                        Logger.warning(f"waybackurls: budget exhausted ({_WAYBACK_BUDGET}s), skipping {domain}")
+                        continue
+
+                    per_timeout = min(240, int(remaining))
                     try:
                         result = subprocess.run(
                             ['waybackurls', domain],
                             capture_output=True,
                             text=True,
-                            timeout=240
+                            timeout=per_timeout
                         )
                         self._append_log(wayback_log, f"{domain} (rc={result.returncode})", result.stderr)
 
@@ -1519,12 +1548,14 @@ class URLCollector:
                     'elapsed': round(time.time() - _t0, 1),
                     'timeouts': timeouts,
                     'failures': failures,
+                    'skipped': skipped,
+                    'urls': len(urls),
                 }
 
                 with open(wayback_file, 'w') as f:
                     f.write('\n'.join(sorted(urls)) + '\n')
 
-                Logger.success(f"waybackurls: {len(urls)} URLs (timeouts={timeouts}, failures={failures})")
+                Logger.success(f"waybackurls: {len(urls)} URLs (timeouts={timeouts}, failures={failures}, skipped={skipped})")
 
             except Exception as e:
                 _tool_log['waybackurls'] = {'status': 'error', 'rc': -1, 'elapsed': 0, 'msg': str(e)}
@@ -2070,7 +2101,12 @@ class JSAnalyzer:
         downloaded = 0
         failures = 0
 
+        # Disable SSL warnings — scanned hosts often have self-signed / expired certs.
+        # verify=False is intentional in this recon context.
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
         session = requests.Session()
+        session.verify = False
         headers = {'User-Agent': USER_AGENT}
 
         for url in sorted(js_urls)[:limit]:
