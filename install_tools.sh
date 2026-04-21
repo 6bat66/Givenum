@@ -30,6 +30,7 @@ header()  {
 # DETECT ENVIRONMENT
 # ============================================================================
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')   # darwin | linux
 ARCH=$(uname -m)                               # x86_64 | arm64 | aarch64
 
@@ -213,6 +214,8 @@ header "SUBDOMAIN ENUMERATION TOOLS"
 
 go_install "github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest" "subfinder"
 go_install "github.com/tomnomnom/assetfinder@latest" "assetfinder"
+go_install "github.com/gwen001/github-subdomains@latest" "github-subdomains"
+go_install "github.com/projectdiscovery/uncover/cmd/uncover@latest" "uncover"
 
 # amass v4
 if ! command_exists amass; then
@@ -261,6 +264,7 @@ header "DNS TOOLS"
 go_install "github.com/projectdiscovery/dnsx/cmd/dnsx@latest" "dnsx"
 go_install "github.com/d3mondev/puredns/v2@latest" "puredns"
 go_install "github.com/vortexau/dnsvalidator@latest" "dnsvalidator"
+go_install "github.com/projectdiscovery/tlsx/cmd/tlsx@latest" "tlsx"
 
 # massdns
 if ! command_exists massdns; then
@@ -306,6 +310,7 @@ go_install "github.com/hueristiq/xurlfind3r/cmd/xurlfind3r@latest" "xurlfind3r"
 go_install "github.com/lc/gau/v2/cmd/gau@latest" "gau"
 go_install "github.com/tomnomnom/waybackurls@latest" "waybackurls"
 go_install "github.com/hakluke/hakrawler@latest" "hakrawler"
+go_install "github.com/projectdiscovery/katana/cmd/katana@latest" "katana"
 go_install "github.com/tomnomnom/meg@latest" "meg"
 
 # Photon
@@ -321,6 +326,17 @@ header "JAVASCRIPT ANALYSIS TOOLS"
 
 go_install "github.com/lc/subjs@latest" "subjs"
 go_install "github.com/003random/getJS@latest" "getJS"
+
+# trufflehog (secret scanner — official install script)
+if ! command_exists trufflehog; then
+    info "Installing trufflehog..."
+    if curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh \
+        | sh -s -- -b "$GOPATH/bin" 2>/dev/null; then
+        success "trufflehog installed"
+    else
+        warning "trufflehog install failed (continuing)"
+    fi
+fi
 
 # jsubfinder (no go install path; build from source)
 if ! command_exists jsubfinder; then
@@ -485,14 +501,20 @@ header "PYTHON DEPENDENCIES"
 
 info "Installing GivEnum Python requirements..."
 
-REQS=$(mktemp)
-cat > "$REQS" << 'EOF'
+REQS="${SCRIPT_DIR:-$(pwd)}/requirements.txt"
+if [ ! -f "$REQS" ]; then
+    warning "requirements.txt not found, using built-in fallback"
+    REQS_TMP=$(mktemp)
+    cat > "$REQS_TMP" << 'EOF'
 requests>=2.31.0
 beautifulsoup4>=4.12.0
 lxml>=4.9.0
 urllib3>=2.0.0
 dnspython>=2.4.0
+flask>=3.0.0
 EOF
+    REQS="$REQS_TMP"
+fi
 
 if in_venv; then
     python3 -m pip install -q -r "$REQS" && success "Python dependencies installed"
@@ -501,7 +523,7 @@ else
         || python3 -m pip install -q --break-system-packages -r "$REQS" 2>/dev/null \
         || warning "Some Python packages may have failed"
 fi
-rm -f "$REQS"
+[ -n "${REQS_TMP:-}" ] && rm -f "$REQS_TMP"
 
 # ============================================================================
 # FINAL VERIFICATION

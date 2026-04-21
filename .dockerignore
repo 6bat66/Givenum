@@ -1,0 +1,12 @@
+.git
+.gitignore
+results
+venv
+__pycache__
+*.pyc
+batch_logs
+web/.next
+web/node_modules
+web/tsconfig.tsbuildinfo
+node_modules
+Dockerfile.web

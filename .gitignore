@@ -1,0 +1,41 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.env
+
+# Scan results (can be large)
+results/
+batch_logs/
+
+# Node / Next.js
+web/node_modules/
+web/.next/
+web/out/
+web/.env.local
+web/.env*.local
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+# But keep the Next.js API route that happens to be named "logs"
+!web/src/**/logs/
+
+# Archives
+*.tar.gz
+archives/

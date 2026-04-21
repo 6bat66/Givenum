@@ -58,6 +58,9 @@ python3 GivEnum.py -d example.com -o /path/to/output
 # Process multiple domains
 ./batch_enum.sh domains.txt
 
+# Process multiple domains in active mode
+./batch_enum.sh domains.txt --active
+
 # Parallel processing
 ./batch_enum.sh domains.txt --parallel 3
 
@@ -66,6 +69,15 @@ python3 GivEnum.py -d example.com -o /path/to/output
 
 # Skip optional steps
 ./batch_enum.sh domains.txt --skip-screenshots --skip-portscan
+```
+
+### Docker Dashboard
+
+```bash
+docker compose up app --build
+# open http://localhost:3000
+
+docker compose run --rm scanner -d example.com --active
 ```
 
 ### Analysis
