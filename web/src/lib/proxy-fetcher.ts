@@ -75,7 +75,7 @@ async function fetchSource(url: string): Promise<string[]> {
   }
 }
 
-function normaliseProxy(raw: string): string | null {
+export function normaliseProxy(raw: string): string | null {
   raw = raw.trim()
   if (!raw || raw.startsWith('#')) return null
   // Already has protocol

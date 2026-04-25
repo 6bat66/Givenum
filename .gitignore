@@ -41,3 +41,4 @@ logs/
 # Archives
 *.tar.gz
 archives/
+*.bak

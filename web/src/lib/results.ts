@@ -78,7 +78,7 @@ function detectScanMode(scanDir: string, reportMeta: ReportMeta | null): 'active
   return activeArtifacts.some((filePath) => fs.existsSync(filePath)) ? 'active' : 'passive'
 }
 
-function buildDiffData(currentFile: string, previousFile: string): DiffData {
+export function buildDiffData(currentFile: string, previousFile: string): DiffData {
   const current = readLines(currentFile)
   const previous = readLines(previousFile)
   const currentSet = new Set(current)

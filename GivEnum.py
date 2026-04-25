@@ -582,8 +582,10 @@ class OutputManager:
     # Restrict the domain segment to characters legal in DNS/hostnames so
     # an attacker can't craft `../../../etc` and escape the results dir.
     # Allowed: letters, digits, dot, hyphen, underscore, colon (for ports),
-    # asterisk (wildcard subs). Anything else → raise.
-    _SAFE_DOMAIN_RE = re.compile(r'^[A-Za-z0-9._\-:*]{1,253}$')
+    # asterisk (wildcard subs). The lookahead also requires at least one
+    # alphanumeric character so meaningless inputs like `..` or `***` don't
+    # produce gibberish output directories.
+    _SAFE_DOMAIN_RE = re.compile(r'^(?=.*[A-Za-z0-9])[A-Za-z0-9._\-:*]{1,253}$')
 
     def __init__(self, base_dir: str, domain: str):
         if not self._SAFE_DOMAIN_RE.match(domain or ''):

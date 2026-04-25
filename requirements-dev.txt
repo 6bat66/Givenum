@@ -1,0 +1,6 @@
+# Test / dev dependencies — install with:
+#   pip install --break-system-packages -r requirements-dev.txt
+# (or inside a venv: pip install -r requirements-dev.txt)
+
+pytest>=7.4
+pytest-timeout>=2.1   # safety net for runaway threads in concurrency tests
