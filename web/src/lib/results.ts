@@ -78,20 +78,19 @@ function detectScanMode(scanDir: string, reportMeta: ReportMeta | null): 'active
   return activeArtifacts.some((filePath) => fs.existsSync(filePath)) ? 'active' : 'passive'
 }
 
-function readDiffFile(filePath: string): DiffData {
-  if (!fs.existsSync(filePath)) return { new: [], removed: [] }
-  const newItems: string[] = []
-  const removedItems: string[] = []
-  let section: 'new' | 'removed' | null = null
+function buildDiffData(currentFile: string, previousFile: string): DiffData {
+  const current = readLines(currentFile)
+  const previous = readLines(previousFile)
+  const currentSet = new Set(current)
+  const previousSet = new Set(previous)
 
-  for (const line of readLines(filePath)) {
-    if (line === '# NEW ITEMS') { section = 'new'; continue }
-    if (line === '# REMOVED ITEMS') { section = 'removed'; continue }
-    if (section === 'new') newItems.push(line)
-    else if (section === 'removed') removedItems.push(line)
+  return {
+    current,
+    previous,
+    new: current.filter((item) => !previousSet.has(item)),
+    persisted: current.filter((item) => previousSet.has(item)),
+    removed: previous.filter((item) => !currentSet.has(item)),
   }
-
-  return { new: newItems, removed: removedItems }
 }
 
 function findScanDirectories(baseDir: string): string[] {
@@ -269,17 +268,30 @@ export function getScan(scanId: string): ScanData | null {
   }
 
   const diffSummary = readJson<{ previous_scan?: string }>(path.join(scanDir, 'diff', 'diff_summary.json'))
+  const previousScanDir = diffSummary?.previous_scan
+    ? path.join(path.dirname(scanDir), diffSummary.previous_scan)
+    : null
+
+  // Map each diff filename to the category subdirectory and the source filename.
+  // Single source of truth — adding a new diffable artifact only requires one entry here.
+  const DIFF_SOURCES: Record<string, { dir: string; file: string }> = {
+    'all_subdomains.txt.diff': { dir: 'subdomains',     file: 'all_subdomains.txt' },
+    'alive.txt.diff':          { dir: 'http',           file: 'alive.txt' },
+    'urls_clean.txt.diff':     { dir: 'urls',           file: 'urls_clean.txt' },
+    'open_ports.txt.diff':     { dir: 'ports',          file: 'open_ports.txt' },
+    'nuclei_results.txt.diff': { dir: 'vulnerabilities', file: 'nuclei_results.txt' },
+  }
+
   const diffFiles: Record<string, DiffData> = {}
-  for (const diffName of [
-    'all_subdomains.txt.diff',
-    'alive.txt.diff',
-    'urls_clean.txt.diff',
-    'open_ports.txt.diff',
-    'nuclei_results.txt.diff',
-  ]) {
-    const diffData = readDiffFile(path.join(scanDir, 'diff', diffName))
-    if (diffData.new.length || diffData.removed.length) {
-      diffFiles[diffName] = diffData
+  if (previousScanDir && fs.existsSync(previousScanDir)) {
+    for (const [diffName, { dir, file }] of Object.entries(DIFF_SOURCES)) {
+      const currentFile = path.join(scanDir, dir, file)
+      const previousFile = path.join(previousScanDir, dir, file)
+      if (!fs.existsSync(currentFile) || !fs.existsSync(previousFile)) continue
+      const diffData = buildDiffData(currentFile, previousFile)
+      if (diffData.new.length || diffData.removed.length || diffData.persisted.length) {
+        diffFiles[diffName] = diffData
+      }
     }
   }
 

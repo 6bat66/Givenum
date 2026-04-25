@@ -78,6 +78,12 @@ pip_install() {
     return 1
 }
 
+# Aggregate counters used by the final summary
+INSTALL_OK=0
+INSTALL_SKIP=0
+INSTALL_FAIL=0
+FAILED_NAMES=()
+
 # go_install <module@version> <binary_name>
 go_install() {
     local module="$1"
@@ -85,14 +91,37 @@ go_install() {
 
     if command_exists "$bin"; then
         skip "$bin"
+        INSTALL_SKIP=$((INSTALL_SKIP + 1))
         return 0
     fi
 
     info "Installing $bin..."
     if go install -v "$module" 2>/dev/null; then
         success "$bin installed"
+        INSTALL_OK=$((INSTALL_OK + 1))
     else
         warning "Failed to install $bin (continuing)"
+        INSTALL_FAIL=$((INSTALL_FAIL + 1))
+        FAILED_NAMES+=("$bin")
+    fi
+}
+
+# try_run <label> <cmd...>
+# Standardised wrapper for ad-hoc installers that don't fit go_install / pip_install
+# (curl downloads, git clone + make, etc.). Updates the install counters.
+try_run() {
+    local label="$1"
+    shift
+    info "Installing $label..."
+    if "$@"; then
+        success "$label installed"
+        INSTALL_OK=$((INSTALL_OK + 1))
+        return 0
+    else
+        warning "Failed to install $label (continuing)"
+        INSTALL_FAIL=$((INSTALL_FAIL + 1))
+        FAILED_NAMES+=("$label")
+        return 1
     fi
 }
 
@@ -571,6 +600,16 @@ echo ""
 success "Installation complete!"
 echo ""
 
+# ── Per-tool install summary ────────────────────────────────────────────────
+echo "Install summary:"
+echo -e "  ${GREEN}✓ installed:${NC} $INSTALL_OK"
+echo -e "  ${CYAN}~ skipped:${NC}   $INSTALL_SKIP  (already on PATH)"
+if [ "$INSTALL_FAIL" -gt 0 ]; then
+    echo -e "  ${YELLOW}! failed:${NC}    $INSTALL_FAIL"
+    echo "    → ${FAILED_NAMES[*]}"
+fi
+echo ""
+
 if [ "${#MISSING_CRITICAL[@]}" -gt 0 ]; then
     warning "Missing critical tools: ${MISSING_CRITICAL[*]}"
     echo "  Run 'source $SHELL_CONFIG' and try again, or install manually."
@@ -583,4 +622,10 @@ info "Next steps:"
 echo "  1. python3 GivEnum.py --configure-api   # configure API keys"
 echo "  2. python3 GivEnum.py --check-tools      # verify everything"
 echo "  3. python3 GivEnum.py -d example.com     # first scan"
+
+# Exit non-zero if any critical tool is still missing — useful for CI.
+if [ "${#MISSING_CRITICAL[@]}" -gt 0 ]; then
+    exit 2
+fi
+exit 0
 echo ""

@@ -41,10 +41,10 @@ export default async function ScanPage({ params }: { params: Promise<{ id: strin
   const totalVulns = Object.values(data.nuclei).flat().length
 
   return (
-    <div className="max-w-screen-2xl mx-auto px-5 py-4">
+    <div className="max-w-screen-2xl mx-auto px-4 py-4 md:px-5">
 
       {/* ── breadcrumb + meta bar ──────────────────────────────────── */}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mb-4" style={{ fontSize: '12px' }}>
+      <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2" style={{ fontSize: '12px' }}>
         <Link href="/" style={{ color: 'var(--text-muted)' }} className="hover:text-white transition-colors">
           ~/givenum
         </Link>
@@ -59,6 +59,12 @@ export default async function ScanPage({ params }: { params: Promise<{ id: strin
 
         <span style={{ color: 'var(--text-subtle)', fontSize: '11px' }}>{data.timestamp}</span>
 
+        {data.diff.previousScan && (
+          <span className="text-[11px]" style={{ color: 'var(--text-subtle)' }}>
+            diff ← {data.diff.previousScan}
+          </span>
+        )}
+
         {data.analysisAvailable && (
           <Link
             href={`/api/scan/${data.id}/analysis`}
@@ -72,11 +78,12 @@ export default async function ScanPage({ params }: { params: Promise<{ id: strin
 
       {/* ── compact stats bar ─────────────────────────────────────── */}
       <div
-        className="flex flex-wrap items-center gap-4 px-4 py-2.5 mb-5"
+        className="mb-5 flex flex-wrap items-center gap-3 px-4 py-3"
         style={{
           background: 'var(--surface)',
           border: '1px solid var(--border)',
-          borderRadius: 'var(--radius)',
+          borderRadius: 'var(--radius-lg)',
+          boxShadow: 'var(--glow-purple)',
         }}>
         <span className="tag-fnd">[FND]</span>
         <StatChip value={data.stats.subdomains} label="subdomains" color="var(--cyan)" />

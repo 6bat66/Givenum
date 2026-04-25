@@ -87,6 +87,28 @@ RUN go install github.com/takshal/freq@latest 2>/dev/null || echo "[!] freq fail
 RUN go install github.com/hahwul/dalfox/v2@latest 2>/dev/null || echo "[!] dalfox failed (non-critical)"
 RUN go install github.com/PentestPad/subzy@latest 2>/dev/null || echo "[!] subzy failed (non-critical)"
 RUN go install github.com/haccer/subjack@latest 2>/dev/null || echo "[!] subjack failed (non-critical)"
+RUN go install github.com/projectdiscovery/naabu/v2/cmd/naabu@latest 2>/dev/null || echo "[!] naabu failed (non-critical)"
+RUN go install github.com/projectdiscovery/shuffledns/cmd/shuffledns@latest 2>/dev/null || echo "[!] shuffledns failed (non-critical)"
+RUN go install github.com/tomnomnom/gf@latest 2>/dev/null || echo "[!] gf failed (non-critical)"
+# gf patterns: built-in examples + 1ndianl33t community patterns
+RUN mkdir -p /root/.gf && \
+    GF_EXAMPLES=$(find /root/go/pkg/mod/github.com/tomnomnom -maxdepth 2 -type d -name 'examples' 2>/dev/null | head -1) && \
+    [ -n "$GF_EXAMPLES" ] && cp "$GF_EXAMPLES"/*.json /root/.gf/ 2>/dev/null || true
+RUN git clone --depth=1 -q https://github.com/1ndianl33t/Gf-Patterns /tmp/gf-patterns 2>/dev/null && \
+    cp /tmp/gf-patterns/*.json /root/.gf/ && \
+    rm -rf /tmp/gf-patterns || echo "[!] gf-patterns clone failed (non-critical)"
+RUN go install github.com/ffuf/ffuf/v2@latest 2>/dev/null || echo "[!] ffuf failed (non-critical)"
+RUN go install github.com/projectdiscovery/notify/cmd/notify@latest 2>/dev/null || echo "[!] notify failed (non-critical)"
+RUN go install github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest 2>/dev/null || echo "[!] interactsh-client failed (non-critical)"
+# ── Phase 2 tools ─────────────────────────────────────────────────────────────
+RUN go install github.com/lobuhi/byp4xx@latest 2>/dev/null || echo "[!] byp4xx failed (non-critical)"
+RUN go install github.com/assetnote/kiterunner/cmd/kr@latest 2>/dev/null || echo "[!] kiterunner (kr) failed (non-critical)"
+RUN python3 -m pip install --break-system-packages -q jwt-tool 2>/dev/null || echo "[!] jwt-tool failed (non-critical)"
+RUN python3 -m pip install --break-system-packages -q s3scanner 2>/dev/null || echo "[!] s3scanner failed (non-critical)"
+# kiterunner routes wordlist
+RUN mkdir -p /root/.kiterunner && \
+    curl -fsSL "https://wordlists-cdn.assetnote.io/data/kiterunner/routes-small.kite" \
+      -o /root/.kiterunner/routes-small.kite 2>/dev/null || echo "[!] kiterunner wordlist download failed (non-critical)"
 RUN go install github.com/owasp-amass/amass/v4/...@latest 2>/dev/null || echo "[!] amass install failed (non-critical)"
 RUN go install github.com/gwen001/github-subdomains@latest 2>/dev/null || echo "[!] github-subdomains failed (non-critical)"
 RUN go install github.com/projectdiscovery/uncover/cmd/uncover@latest 2>/dev/null || echo "[!] uncover failed (non-critical)"
@@ -112,6 +134,13 @@ RUN git clone --depth=1 -q https://github.com/ThreatUnknown/jsubfinder /tmp/jsub
 
 RUN curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh \
     | sh -s -- -b /root/go/bin 2>/dev/null || echo "[!] trufflehog install failed (non-critical)"
+
+# SecLists wordlists — only the most-used ones to keep image size reasonable
+RUN mkdir -p /usr/share/seclists/Discovery/Web-Content && \
+    curl -fsSL "https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/raft-medium-directories.txt" \
+      -o /usr/share/seclists/Discovery/Web-Content/raft-medium-directories.txt && \
+    curl -fsSL "https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt" \
+      -o /usr/share/seclists/Discovery/Web-Content/common.txt
 
 RUN nuclei -update-templates 2>/dev/null || true
 

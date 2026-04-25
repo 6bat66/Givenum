@@ -1,381 +1,275 @@
 # GivEnum
 
-**Reconnaissance framework with web dashboard — subdomain discovery, URL collection, vulnerability scanning and asset analysis.**
+**Reconnaissance and active-scanning platform for web targets.**
+Subdomain enumeration, URL collection, JavaScript analysis, port scanning, vulnerability detection — driven from a CLI or a web dashboard, all from one container.
 
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-blue)]()
 [![Python](https://img.shields.io/badge/python-3.8%2B-green)]()
 [![Go](https://img.shields.io/badge/go-1.19%2B-00ADD8)]()
+[![Next.js](https://img.shields.io/badge/next.js-15-000)]()
 [![Docker](https://img.shields.io/badge/docker-ready-2496ED)]()
 
 ---
 
-## Overview
+## What it is
 
-GivEnum orchestrates 30+ security tools for comprehensive web reconnaissance. Run it from the CLI or use the built-in **Next.js web dashboard** to start scans, monitor live output, manage projects and browse results from any browser.
+GivEnum orchestrates 30+ open-source security tools (ProjectDiscovery, Tomnomnom, Hahwul, OWASP, Assetnote, etc.) into a coherent enumeration pipeline. You point it at a domain, it runs everything in parallel, normalizes the output, deduplicates, diffs against the previous run, and saves it as browsable artifacts plus an HTML report.
 
-### Key Features
+Two ways to drive it:
 
-- **Web Dashboard** — Start scans, watch live logs, manage jobs/scans/projects from the browser
-- **Docker-first** — Single `docker compose up` runs the full stack (tools + dashboard)
-- **Password Protected** — Dashboard requires a password; set `GIVENUM_PASSWORD` in `.env`
-- **Job Management** — Stop, pause and resume running scans; delete old jobs and results
-- **Passive/Active Mode** — Default is silent passive recon; `--active` unlocks brute-force, nuclei, dalfox, arjun, subjack
-- **Multi-Source Subdomain Enum** — Combines 8+ tools and APIs for maximum coverage
-- **URL Collection** — xurlfind3r, gau, waybackurls, hakrawler
-- **JavaScript Analysis** — jsubfinder, subjs, getJS
-- **Port Scanning** — sdlookup (Shodan InternetDB, no noise)
-- **Vulnerability Scanning** — Nuclei with 3000+ templates (active mode)
-- **XSS Detection** — Dalfox (active mode)
-- **Git Exposure** — goop + git-dumper automatic detection and dump
-- **Diff Tracking** — Change monitoring between scans
-- **API Integration** — VirusTotal, SecurityTrails, CertSpotter, AlienVault OTX
-- **Tool Execution Logs** — Every tool's stderr saved to `logs/`, summary printed at end of scan
+1. **CLI** (`GivEnum.py`) — a single Python orchestrator. Good for automation, cron, CI.
+2. **Web dashboard** (`web/`) — Next.js 15 + React 19 frontend that spawns the same Python orchestrator, tails its log live, manages jobs, and lets you configure proxies, API keys and tool installations from the browser.
 
 ---
 
-## Quick Start — Docker (recommended)
+## Quick start — Docker (recommended)
+
+The container ships with every tool pre-installed and the dashboard pre-built.
 
 ```bash
 git clone https://github.com/6bat66/Givenum
 cd Givenum
 
-# Set your dashboard password
 cp .env.example .env
-nano .env   # set GIVENUM_PASSWORD
+$EDITOR .env                    # set GIVENUM_PASSWORD
 
-# Build and start (first run ~10 min — installs all tools)
-docker compose up -d app
-
-# Open dashboard
-open http://localhost:3000
+docker compose up -d app        # first build ~8-12 min
+open http://localhost:3000      # log in with the password you set
 ```
 
-From the dashboard you can start scans, watch real-time output, stop/pause jobs, and browse results.
-
-### CLI scan using the same Docker image
+CLI mode using the same image:
 
 ```bash
-docker compose run --rm scanner -d example.com --active
+docker compose run --rm scanner -d example.com            # passive
+docker compose run --rm scanner -d example.com --active   # passive + active
 ```
+
+Results land under `./results/<project>/<domain>_<timestamp>/`.
 
 ---
 
-## Quick Start — Local (no Docker)
+## Quick start — local install
 
-### Requirements
+### Prerequisites
 
-- macOS or Debian/Kali Linux
-- Python 3.8+, Go 1.19+, Git
+- **OS**: macOS or Debian/Ubuntu/Kali
+- **Runtimes**: Python 3.8+, Go 1.19+, Node.js 20+, Git, curl
+
+### Install
 
 ```bash
 git clone https://github.com/6bat66/Givenum
 cd Givenum
-chmod +x install_tools.sh GivEnum.py
 
-# Install all tools (~10-15 min)
-./install_tools.sh
-source ~/.zshrc   # or ~/.bashrc
+chmod +x install_tools.sh
+./install_tools.sh              # installs all 30+ tools, ~10 min
+source ~/.zshrc                 # or ~/.bashrc — picks up $GOPATH/bin
 
-# Configure API keys
-python3 GivEnum.py --configure-api
+python3 GivEnum.py --check-tools                # confirm everything resolved
+python3 GivEnum.py --configure-api              # one-time API key setup
 
-# Verify
-python3 GivEnum.py --check-tools
+# Run your first scan
+python3 GivEnum.py -d example.com
+```
+
+### Run the dashboard
+
+```bash
+cd web
+npm install
+npm run build
+npm start                       # http://localhost:3000
 ```
 
 ---
 
-## CLI Usage
+## CLI cheatsheet
 
 ```bash
-# Passive scan — subdomain discovery, HTTP, URLs, JS, git, takeover
+# Passive recon (default — safe, low signal)
 python3 GivEnum.py -d example.com
 
-# Active scan — adds brute-force, ports, nuclei, dalfox, subjack, arjun
+# Active mode — includes naabu port scan, nuclei, dalfox, arjun, ffuf, kr
 python3 GivEnum.py -d example.com --active
 
-# Skip heavy steps
-python3 GivEnum.py -d example.com --active --skip-screenshots --skip-portscan
-python3 GivEnum.py -d example.com --active --skip-vuln-scan
+# Skip slow phases
+python3 GivEnum.py -d example.com --active \
+    --skip-screenshots \
+    --skip-portscan \
+    --skip-vuln-scan
 
-# Custom output directory
-python3 GivEnum.py -d example.com -o /path/to/output
+# Disable Slack/Discord/Telegram notifications for one run
+python3 GivEnum.py -d example.com --no-notify
 
-# Check installed tools
+# Tool sanity check
 python3 GivEnum.py --check-tools
-```
 
-### All flags
-
-| Flag | Description |
-|------|-------------|
-| `-d DOMAIN` | Target domain |
-| `-o OUTPUT` | Output directory (default: `./results`) |
-| `--active` | Enable active scanning |
-| `--skip-screenshots` | Skip gowitness |
-| `--skip-portscan` | Skip sdlookup port scan |
-| `--skip-vuln-scan` | Skip nuclei + dalfox |
-| `--check-tools` | Print tool status and exit |
-| `--configure-api` | Configure API keys interactively |
-
----
-
-## Web Dashboard
-
-The dashboard is a Next.js app bundled inside the Docker image.
-
-### Features
-
-| Feature | Description |
-|---------|-------------|
-| **Projects** | Organize scans into projects |
-| **Start Scan** | Launch passive or active scans from the browser |
-| **Live Logs** | Real-time ANSI-colored terminal output |
-| **Job Control** | Stop, pause, resume running jobs |
-| **Management** | Delete jobs, scans and projects |
-| **Progress Bar** | Shows current scan phase |
-| **Scan Browser** | Subdomains, HTTP hosts, URLs, vulns, ports, JS files, screenshots |
-| **Diff View** | Changes detected since previous scan |
-| **API Keys** | Configure tool API keys from the settings page |
-
-### Authentication
-
-Set `GIVENUM_PASSWORD` in `.env` — any unauthenticated request redirects to `/login`. Leave it empty to disable auth for local development.
-
-```env
-GIVENUM_PASSWORD=your-strong-password
-APP_PORT=3000
-```
-
-### VPS Deploy
-
-```bash
-ssh root@your-vps
-
-curl -fsSL https://get.docker.com | sh
-
-git clone -b organize-web-enum-tools https://github.com/6bat66/Givenum
-cd Givenum
-cp .env.example .env
-nano .env   # set GIVENUM_PASSWORD
-
-docker compose up -d app
-docker compose logs -f app
-```
-
-For HTTPS and access control on a public VPS, put Cloudflare Access or a reverse proxy (Caddy/nginx) in front of port 3000.
-
----
-
-## Passive vs Active Mode
-
-| Feature | Passive (default) | Active (`--active`) |
-|---|:---:|:---:|
-| Subdomain discovery (passive APIs) | ✓ | ✓ |
-| DNS resolution + HTTP probing | ✓ | ✓ |
-| Screenshots (gowitness) | ✓ | ✓ |
-| URL collection | ✓ | ✓ |
-| JS analysis + git exposure | ✓ | ✓ |
-| Takeover check (subzy) | ✓ | ✓ |
-| DNS brute-force (puredns) | — | ✓ |
-| Port scan (sdlookup/Shodan) | — | ✓ |
-| Vulnerability scan (nuclei) | — | ✓ |
-| XSS scan (dalfox) | — | ✓ |
-| Parameter discovery (arjun) | — | ✓ |
-| Takeover check (subjack) | — | ✓ |
-
----
-
-## Output Structure
-
-```
-results/example.com_20250122_123456/
-├── subdomains/       all_subdomains.txt, bruteforce.txt (--active), per-tool files
-├── api_data/         virustotal, alienvault, securitytrails
-├── dns/              resolved.txt, a_records.txt, cname_records.txt
-├── http/             alive.txt, httpx_full.json
-├── urls/             urls_clean.txt, per-tool files
-├── js/               all_js_files.txt, jsubfinder_results.txt
-├── git/              exposed_git.txt, dumped repos
-├── ports/            open_ports.txt, sdlookup_results.json  (--active)
-├── vulnerabilities/  nuclei_results.txt, dalfox_results.txt (--active)
-├── parameters/       interesting_parameters.txt, arjun_params.txt (--active)
-├── cloud/            aws_services.txt, azure_services.txt, gcp_services.txt
-├── takeover/         subzy_results.json, subjack_results.txt (--active)
-├── screenshots/      gowitness output
-├── diff/             *.diff files vs previous scan
-├── reports/          report.md, report.json, analysis.md
-└── logs/             per-tool stderr logs + execution_summary.json
-```
-
----
-
-## Tool Stack
-
-### Passive
-
-| Tool | Purpose |
-|------|---------|
-| subfinder | Passive subdomain discovery |
-| assetfinder | Subdomain enumeration |
-| findomain | Fast subdomain finder |
-| amass | In-depth subdomain enum |
-| github-subdomains | GitHub code search for subdomains (needs token) |
-| uncover | Multi-engine OSINT — Shodan, Censys, Fofa, Hunter, Netlas |
-| tlsx | TLS cert SAN extraction for new subdomains |
-| dnsx | Fast DNS resolver |
-| httpx | HTTP probe & analyzer |
-| gowitness | Screenshot capture |
-| xurlfind3r | Unified URL finder |
-| gau | Get All URLs (archive, root domain) |
-| waybackurls | Wayback Machine URLs (root domain) |
-| katana | Modern active web crawler |
-| hakrawler | Web crawler |
-| subjs / getJS | JS file collection |
-| jsubfinder | JS endpoint finder |
-| trufflehog | Secret scanning in JS and git dumps |
-| subzy | Subdomain takeover check |
-| goop / git-dumper | Git repo dumper |
-
-### Active (`--active`)
-
-| Tool | Purpose |
-|------|---------|
-| puredns | DNS brute-force |
-| massdns | High-performance DNS resolution |
-| sdlookup | Port scan via Shodan InternetDB |
-| nuclei | Vulnerability scanning (3000+ templates) |
-| dalfox | Automated XSS detection |
-| arjun | HTTP parameter discovery |
-| subjack | Subdomain takeover |
-
----
-
-## API Configuration
-
-```bash
-# Interactive
+# (Re)configure API keys
 python3 GivEnum.py --configure-api
-
-# Manual
-mkdir -p ~/.config/givenum
-cat > ~/.config/givenum/api_keys.json << 'EOF'
-{
-  "virustotal": "YOUR_KEY",
-  "securitytrails": "YOUR_KEY",
-  "certspotter": "YOUR_KEY",
-  "shodan": "YOUR_KEY"
-}
-EOF
 ```
 
-API keys can also be configured from the dashboard Settings page.
-
-With keys configured expect **50–200% more subdomains** discovered.
+`--check-tools` separates **critical** (scan can't start without them — `subfinder`, `httpx`, `dnsx`, plus `naabu`/`nuclei` for active mode), **recommended** (scan loses capability without them) and **optional**.
 
 ---
 
-## Batch Processing
+## Dashboard tour
 
-```bash
-./batch_enum.sh domains.txt
-./batch_enum.sh domains.txt --active
-./batch_enum.sh domains.txt --parallel 3
-./batch_enum.sh domains.txt --delay 60
+| Page | What it does |
+|---|---|
+| `/` | Project list, active scans, finished scans. Quick rescan from any past scan. |
+| `/job/[id]` | Live log of a running scan with ANSI colors, pause/resume/stop, per-tool stderr tail. |
+| `/scan/[id]` | Tabbed result browser — overview, hosts, subdomains (alive-only filter), URLs (extension filter), nuclei findings, dalfox, ports, screenshots (external domains filtered out), diff vs previous run, raw tool logs. |
+| `/settings/apis` | Manage API keys (Shodan, Censys, VirusTotal, SecurityTrails, GitHub token, Discord webhook, Telegram). Masked display; empty value clears the key. |
+| `/settings/proxy` | Single-mode (e.g. Burp) or rotate-mode (fetched from 10 public proxy lists, validated via `curl --proxy`). |
+| `/settings/tools` | Per-tool install status with version. Select one or many and update from the browser; live tail of the install log. |
+| `/settings/reports` | Generate an HTML report for any past scan, ready to share. |
+
+---
+
+## Architecture
+
+```
+.
+├── GivEnum.py                  # main orchestrator (~5k lines, will be modularised)
+├── analyze_results.py          # standalone post-scan analyser
+├── scan_runner.py              # thin wrapper used by the web UI to spawn a scan
+├── install_tools.sh            # cross-platform tool installer (macOS / Debian / Kali)
+├── batch_enum.sh               # CLI multi-domain runner
+├── docker-compose.yml          # `app` (web + tools) and `scanner` (CLI) services
+├── Dockerfile                  # builds the all-in-one image
+├── results/                    # per-project, per-domain scan output
+└── web/                        # Next.js 15 dashboard
+    ├── src/app/                # routes (App Router)
+    │   ├── api/                # job spawning, log tailing, settings, reports
+    │   ├── settings/           # configuration sub-pages (apis, proxy, tools, reports)
+    │   ├── job/[id]/           # live job page
+    │   └── scan/[id]/          # scan result page
+    ├── src/components/         # ScanTabs, JobLogViewer, ProxySettingsForm, etc.
+    └── src/lib/                # results parser, app data, proxy fetcher, ANSI renderer
+```
+
+The web app does **not** scan — it spawns `python3 scan_runner.py` as a detached child and writes job metadata to `~/.config/givenum/jobs/`. The Python process writes scan output to `./results/`. The dashboard reads both to render.
+
+### Output layout per scan
+
+```
+results/<project>/<domain>_YYYYMMDD_HHMMSS/
+├── subdomains/                 # all_subdomains.txt + per-tool files
+├── dns/                        # dnsx, tlsx, puredns
+├── http/                       # alive.txt, httpx JSON
+├── ports/                      # naabu output
+├── urls/                       # urls_clean.txt, gau/wayback/katana raw
+├── js/                         # subjs, jsubfinder, trufflehog
+├── screenshots/                # gowitness PNGs
+├── vulnerabilities/            # nuclei_results.txt, dalfox
+├── parameters/                 # arjun
+├── git/                        # exposed_git.txt, dumps
+├── api_data/                   # kiterunner, JWTs, S3 buckets
+├── takeover/                   # subzy
+├── cloud/                      # cloud provider attribution
+├── diff/                       # vs previous scan
+├── reports/                    # report.md, report.html
+└── logs/                       # per-tool stderr + execution_summary.json
 ```
 
 ---
 
-## Troubleshooting
+## Tools used
 
-**Tool not found**
-```bash
-python3 GivEnum.py --check-tools
-./install_tools.sh
-```
+**Subdomain discovery:** subfinder · amass · assetfinder · findomain · knockpy · github-subdomains · uncover · puredns
 
-**puredns returns 0 subdomains**
+**DNS / resolution:** dnsx · puredns · massdns · tlsx · shuffledns
 
-Expected for targets behind Cloudflare/Akamai CDN — anycast IPs cause trusted-resolver validation to drop results. httpx resolves independently and will still find active hosts.
+**HTTP probing & screenshots:** httpx · gowitness
 
-**View tool logs**
-```bash
-cat results/*/logs/execution_summary.json
-tail -f results/*/logs/subfinder.log
-```
+**URL collection:** gau · waybackurls · katana · hakrawler · xurlfind3r · meg
 
----
+**JavaScript & secrets:** subjs · jsubfinder · getJS · trufflehog
 
-## Security & Legal
+**Port scanning:** naabu · sdlookup (Shodan InternetDB)
 
-Use only on systems you have explicit permission to test: your own infrastructure, bug bounty programs (within scope), or authorized engagements.
+**Vulnerability scanning:** nuclei · dalfox · subzy · subjack · byp4xx · ffuf · arjun · kiterunner · jwt-tool · s3scanner · sqlmap
+
+**Utility:** anew · gf · uro · unfurl · qsreplace · freq · notify · interactsh-client
+
+**Wordlists:** SecLists (raft-medium-directories.txt, common.txt) · Gf-Patterns
 
 ---
 
-## Changelog
+## API keys
 
-### v4.0 — In Development
+Configure once via the CLI (`python3 GivEnum.py --configure-api`) or in the dashboard at `/settings/apis`. Storage is `~/.config/givenum/api.json`, keys are masked when displayed.
 
-> **Not stable yet.** The web dashboard and Docker support are actively being developed. Use v3 for production work.
-
-**Web Dashboard (WIP)**
-- Next.js dashboard: start scans, browse results, manage jobs
-- Real-time log streaming with ANSI color rendering
-- Stop, pause and resume running jobs
-- Delete jobs, scans and projects from the UI
-- Password-based auth (`GIVENUM_PASSWORD`)
-
-**Docker (WIP)**
-- Single `docker compose up app` runs the full stack
-- `docker compose run --rm scanner` for CLI scans using the same image
-
-**Tool Logging**
-- All tool stderr saved to `logs/<tool>.log`
-- `logs/execution_summary.json` with status, exit code and timing per tool
-- Summary table printed at end of every scan
+| Service | Used by |
+|---|---|
+| Shodan | subfinder, uncover, ReconEnricher |
+| Censys (id + secret) | subfinder, amass, uncover |
+| Fofa (email + key) | uncover |
+| VirusTotal | passive subdomain enrichment |
+| SecurityTrails | passive subdomain enrichment |
+| CertSpotter | certificate transparency |
+| Hunter.io | uncover |
+| Netlas | uncover |
+| GitHub PAT | github-subdomains |
+| Discord webhook / Telegram bot / Slack webhook | NotificationManager |
 
 ---
 
-### v3.0 (stable — recommended for CLI use)
+## Proxy support
 
-> The CLI is fully stable and works standalone — no Docker or web required.
->
-> ```bash
-> # Install
-> ./install_tools.sh
->
-> # Run
-> python3 GivEnum.py -d example.com
-> python3 GivEnum.py -d example.com --active
-> ```
+Two modes, configurable from `/settings/proxy`:
 
-- `--active` flag gates all intrusive tools behind a single flag
-- Default run is fully passive
-- Dalfox XSS scanning (active mode)
-- Subjack takeover check (active mode)
-- Arjun parameter discovery (active mode)
-- Fixed xurlfind3r, gau v2 and waybackurls input handling
+- **Single mode** — point GivEnum at one proxy (typical use: Burp on `http://127.0.0.1:8080`). Set `http`, `https` and an optional `noProxy` bypass list.
+- **Rotate mode** — fetch the latest free proxy list from 10 public sources (proxyscrape, jetkai/proxy-list, GitHub mirrors), validate each one in batches of 40 with `curl`, and use only the working ones. Refresh from the dashboard; status polls live.
 
-### v2.0
-
-- Modern URL collection (xurlfind3r)
-- JavaScript analysis (jsubfinder)
-- Port scanning via sdlookup/Shodan
-- Git repository dumping
-- Cross-platform support (macOS + Linux)
-- Diff tracking between scans
+Proxies are validated with `execFile` (no shell) so a malicious entry in a public list cannot inject commands.
 
 ---
 
-## Acknowledgments
+## Diff between scans
 
-- [ProjectDiscovery](https://github.com/projectdiscovery) — subfinder, httpx, nuclei, dnsx, dalfox
-- [TomNomNom](https://github.com/tomnomnom) — waybackurls, anew, unfurl, assetfinder
-- [OWASP Amass](https://github.com/owasp-amass/amass)
-- [Findomain](https://github.com/Findomain/Findomain)
-- [xurlfind3r](https://github.com/hueristiq/xurlfind3r)
-- [jsubfinder](https://github.com/ThreatUnknown/jsubfinder)
-- [sdlookup](https://github.com/j3ssie/sdlookup)
-- [goop](https://github.com/nyancrimew/goop)
-- [arjun](https://github.com/s0md3v/Arjun)
-- [subjack](https://github.com/haccer/subjack)
+Every scan compares its output to the most recent previous run for the same domain (in the same project). The dashboard's **Diff** tab shows what's `new`, `removed` and `persisted` for subdomains, alive hosts, URLs, open ports and nuclei findings. Useful for change-monitoring a target you scan weekly.
+
+---
+
+## Notifications
+
+If a Discord/Telegram/Slack credential is set, GivEnum posts a one-line summary at the end of each scan: domain, mode, counts, link to the report. Disable per-run with `--no-notify`.
+
+---
+
+## Roadmap
+
+- Modularise `GivEnum.py` into a proper package (`givenum/recon`, `givenum/scanning`, etc.).
+- Add a minimal pytest suite covering `OutputManager`, domain validation, diff computation, proxy normalisation.
+- Per-host rate limiting (`HostBucket` semaphore) to avoid getting blocked when running multiple tools against the same target in parallel.
+- Centralised exponential-backoff retry wrapper around `subprocess` tool calls.
+- NDJSON job log so the dashboard can render a per-tool timeline without parsing ANSI text.
+
+---
+
+## Project structure for contributors
+
+| Path | Owner |
+|---|---|
+| `GivEnum.py` | scan orchestration, all classes |
+| `web/src/app/api/**` | Next.js API routes (job lifecycle, settings, reports) |
+| `web/src/components/**` | React UI components |
+| `web/src/lib/results.ts` | parses scan output into `ScanData` for the UI |
+| `web/src/lib/app-data.ts` | filesystem layer for jobs, projects, configs |
+| `web/src/lib/tools.ts` | tool registry (used by `/settings/tools`) |
+| `web/src/lib/proxy-fetcher.ts` | proxy fetch + validation runner |
+| `Dockerfile` | image build (Go installs, SecLists, gf-patterns, nuclei templates) |
+| `install_tools.sh` | cross-platform local installer with summary counters |
+
+---
+
+## Disclaimer
+
+This software is for authorized security testing and educational purposes only. Use only against targets you own or have explicit written permission to test. The author and contributors take no responsibility for misuse.
+
+---
+
+## License
+
+Released under the MIT License — see `LICENSE` for details.

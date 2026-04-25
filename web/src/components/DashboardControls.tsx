@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import type { ProjectMeta } from '@/lib/types'
 
 type Props = {
@@ -8,6 +9,7 @@ type Props = {
 }
 
 export default function DashboardControls({ projects }: Props) {
+  const router = useRouter()
   const [projectName, setProjectName]           = useState('')
   const [projectDescription, setProjectDescription] = useState('')
   const [scanDomain, setScanDomain]             = useState('')
@@ -65,7 +67,8 @@ export default function DashboardControls({ projects }: Props) {
       setStatus(`[FND] scan started → ${payload.domain}`)
       setStatusOk(true)
       setScanDomain('')
-      window.location.reload()
+      router.push(`/job/${payload.id}`)
+      router.refresh()
     } catch (err) {
       setStatus(`[ERR] ${err instanceof Error ? err.message : 'Failed'}`)
       setStatusOk(false)
@@ -78,9 +81,9 @@ export default function DashboardControls({ projects }: Props) {
     background: 'var(--surface-2)',
     border: '1px solid var(--border)',
     color: 'var(--text)',
-    borderRadius: 'var(--radius)',
-    padding: '5px 8px',
-    fontSize: '12px',
+    borderRadius: '999px',
+    padding: '10px 14px',
+    fontSize: '13px',
     outline: 'none',
     fontFamily: 'inherit',
   } as const
@@ -89,20 +92,20 @@ export default function DashboardControls({ projects }: Props) {
     background: active ? activeBg : 'var(--surface-2)',
     color: active ? activeColor : 'var(--text-muted)',
     border: `1px solid ${active ? activeColor + '44' : 'var(--border)'}`,
-    borderRadius: 'var(--radius)',
-    padding: '4px 10px',
-    fontSize: '11px',
+    borderRadius: '999px',
+    padding: '8px 13px',
+    fontSize: '12px',
     cursor: 'pointer',
     fontFamily: 'inherit',
   })
 
   return (
-    <div className="mb-5 space-y-2">
+    <div className="mb-5 space-y-3">
 
       {/* ── scan launch bar ──────────────────────────────────────── */}
       <div
-        className="flex flex-wrap items-center gap-2 px-4 py-2.5"
-        style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
+        className="flex flex-wrap items-center gap-3 px-5 py-4"
+        style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--glow-purple)' }}>
 
         <span className="tag-inf" style={{ flexShrink: 0 }}>[RUN]</span>
 
@@ -111,13 +114,13 @@ export default function DashboardControls({ projects }: Props) {
           onChange={(e) => setScanDomain(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && scanDomain.trim() && void startScan()}
           placeholder="target.com"
-          style={{ ...inputStyle, width: '180px', flexShrink: 0 }}
+          style={{ ...inputStyle, width: '220px', flex: '1 1 220px' }}
         />
 
         <select
           value={scanProjectId}
           onChange={(e) => setScanProjectId(e.target.value)}
-          style={{ ...inputStyle, flexShrink: 0 }}>
+          style={{ ...inputStyle, flexShrink: 0, minWidth: 150 }}>
           {projects.map((p) => (
             <option key={p.id} value={p.id}>{p.name}</option>
           ))}
@@ -134,7 +137,7 @@ export default function DashboardControls({ projects }: Props) {
         </div>
 
         {/* skip flags */}
-        <div className="flex gap-3" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+        <div className="flex gap-3" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
           <label className="flex items-center gap-1 cursor-pointer">
             <input type="checkbox" checked={skipScreenshots} onChange={(e) => setSkipScreenshots(e.target.checked)} />
             no-screens
@@ -149,34 +152,35 @@ export default function DashboardControls({ projects }: Props) {
           </label>
         </div>
 
+        <a
+          href="#active-jobs"
+          className="ghost-button px-3 py-2 text-sm transition-colors"
+          style={{ textDecoration: 'none' }}>
+          active jobs ↓
+        </a>
+
         <button
           type="button"
           disabled={busy !== null || scanDomain.trim().length === 0}
           onClick={() => void startScan()}
+          className="neon-button px-4 py-2.5 text-sm font-semibold"
           style={{
-            background: 'var(--green)',
-            color: '#052e16',
-            border: 'none',
-            borderRadius: 'var(--radius)',
-            padding: '5px 14px',
-            fontSize: '12px',
-            fontWeight: 600,
             cursor: busy !== null || !scanDomain.trim() ? 'not-allowed' : 'pointer',
             opacity: busy !== null || !scanDomain.trim() ? 0.5 : 1,
             fontFamily: 'inherit',
             marginLeft: 'auto',
           }}>
-          {busy === 'scan' ? 'starting...' : '❯ scan'}
+          {busy === 'scan' ? 'starting...' : 'RUN'}
         </button>
       </div>
 
       {/* ── new project (collapsed by default) ───────────────────── */}
-      <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
+      <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
         <button
           type="button"
           onClick={() => setShowNewProject((v) => !v)}
-          className="w-full flex items-center gap-2 px-4 py-2"
-          style={{ background: 'var(--surface)', fontSize: '11px', color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'inherit', border: 'none', textAlign: 'left' }}>
+          className="w-full flex items-center gap-2 px-5 py-3"
+          style={{ background: 'var(--surface)', fontSize: '12px', color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'inherit', border: 'none', textAlign: 'left' }}>
           <span style={{ color: showNewProject ? 'var(--green)' : 'var(--text-subtle)' }}>
             {showNewProject ? '▾' : '▸'}
           </span>
@@ -187,12 +191,12 @@ export default function DashboardControls({ projects }: Props) {
           <div className="flex flex-wrap items-end gap-2 px-4 py-3"
             style={{ background: 'var(--surface-2)', borderTop: '1px solid var(--border)' }}>
             <div className="flex flex-col gap-1">
-              <label style={{ fontSize: '10px', color: 'var(--text-subtle)' }}>name</label>
+              <label style={{ fontSize: '11px', color: 'var(--text-subtle)' }}>name</label>
               <input value={projectName} onChange={(e) => setProjectName(e.target.value)}
                 placeholder="my-project" style={{ ...inputStyle, width: '160px' }} />
             </div>
             <div className="flex flex-col gap-1">
-              <label style={{ fontSize: '10px', color: 'var(--text-subtle)' }}>description</label>
+              <label style={{ fontSize: '11px', color: 'var(--text-subtle)' }}>description</label>
               <input value={projectDescription} onChange={(e) => setProjectDescription(e.target.value)}
                 placeholder="optional" style={{ ...inputStyle, width: '220px' }} />
             </div>
@@ -201,9 +205,9 @@ export default function DashboardControls({ projects }: Props) {
               disabled={busy !== null || projectName.trim().length === 0}
               onClick={() => void createProject()}
               style={{
-                background: 'var(--cyan)', color: '#082f49',
-                border: 'none', borderRadius: 'var(--radius)',
-                padding: '5px 14px', fontSize: '12px', fontWeight: 600,
+                background: 'linear-gradient(180deg, rgba(34,211,238,0.9), rgba(34,211,238,0.65))', color: '#082f49',
+                border: '1px solid rgba(34,211,238,0.3)', borderRadius: '999px',
+                padding: '9px 18px', fontSize: '13px', fontWeight: 700,
                 cursor: busy !== null || !projectName.trim() ? 'not-allowed' : 'pointer',
                 opacity: busy !== null || !projectName.trim() ? 0.5 : 1,
                 fontFamily: 'inherit',
@@ -217,11 +221,11 @@ export default function DashboardControls({ projects }: Props) {
       {/* ── status feedback ───────────────────────────────────────── */}
       {status && (
         <div className="px-4 py-2" style={{
-          fontSize: '12px',
+          fontSize: '13px',
           color: statusOk ? 'var(--green)' : 'var(--red)',
           background: statusOk ? '#052e1620' : '#450a0a20',
           border: `1px solid ${statusOk ? '#14532d44' : '#7f1d1d44'}`,
-          borderRadius: 'var(--radius)',
+          borderRadius: 'var(--radius-lg)',
         }}>
           {status}
         </div>

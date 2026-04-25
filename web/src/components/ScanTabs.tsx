@@ -234,34 +234,62 @@ function SummaryTab({ data }: { data: ScanData }) {
 // ── Tab: Subdomains ───────────────────────────────────────────
 
 function SubdomainsTab({ data }: { data: ScanData }) {
-  const [query, setQuery] = useState('')
+  const [query, setQuery]       = useState('')
+  const [aliveOnly, setAliveOnly] = useState(false)
+
+  const alive = useMemo(() => new Set(data.hosts.map((h) => {
+    try { return new URL(h.url).hostname } catch { return h.url }
+  })), [data.hosts])
+
   const all = useMemo(() => [
     ...data.subdomains.map((s) => ({ sub: s, source: 'passive' as const })),
     ...data.bruteforce.map((s) => ({ sub: s, source: 'bruteforce' as const })),
   ], [data])
 
-  const filtered = useMemo(() =>
-    query ? all.filter((i) => i.sub.toLowerCase().includes(query.toLowerCase())) : all
-  , [all, query])
+  const filtered = useMemo(() => {
+    let list = aliveOnly ? all.filter((i) => alive.has(i.sub)) : all
+    if (query) list = list.filter((i) => i.sub.toLowerCase().includes(query.toLowerCase()))
+    return list
+  }, [all, alive, aliveOnly, query])
 
-  const alive = new Set(data.hosts.map((h) => {
-    try { return new URL(h.url).hostname } catch { return h.url }
-  }))
+  const aliveCount = useMemo(() => all.filter(i => alive.has(i.sub)).length, [all, alive])
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center gap-3">
         <div className="text-sm" style={{ color: 'var(--text-muted)' }}>
           <span className="font-semibold" style={{ color: 'var(--cyan)' }}>{data.subdomains.length}</span> passive
           {data.bruteforce.length > 0 && (
             <> · <span className="font-semibold" style={{ color: 'var(--orange)' }}>{data.bruteforce.length}</span> brute-forced</>
           )}
+          {aliveOnly && (
+            <> · <span className="font-semibold" style={{ color: 'var(--green)' }}>{filtered.length}</span> showing</>
+          )}
         </div>
-        <SearchInput placeholder="Filter subdomains…" onChange={setQuery} />
+
+        {/* alive-only toggle */}
+        <button
+          type="button"
+          onClick={() => setAliveOnly((v) => !v)}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors"
+          style={{
+            background: aliveOnly ? 'rgba(74,222,128,0.12)' : 'var(--surface-2)',
+            color: aliveOnly ? 'var(--green)' : 'var(--text-muted)',
+            border: `1px solid ${aliveOnly ? 'rgba(74,222,128,0.3)' : 'var(--border)'}`,
+            cursor: 'pointer', fontFamily: 'inherit',
+          }}>
+          <span style={{ fontSize: '10px' }}>●</span>
+          alive only
+          <span className="font-mono" style={{ opacity: 0.7 }}>({aliveCount})</span>
+        </button>
+
+        <div className="ml-auto">
+          <SearchInput placeholder="Filter subdomains…" onChange={setQuery} />
+        </div>
       </div>
 
       {filtered.length === 0 ? (
-        <EmptyState icon="🔍" text="No matches" />
+        <EmptyState icon="🔍" text="No matches" hint={aliveOnly ? 'No alive subdomains found' : undefined} />
       ) : (
         <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
           <div className="overflow-y-auto" style={{ maxHeight: '60vh' }}>
@@ -290,21 +318,70 @@ function SubdomainsTab({ data }: { data: ScanData }) {
 
 // ── Tab: HTTP Hosts ───────────────────────────────────────────
 
+type StatusFilter = 'all' | '2xx' | '3xx' | '4xx' | '5xx'
+
 function HostsTab({ data }: { data: ScanData }) {
   const [query, setQuery] = useState('')
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+
+  const statusMatch = (code: number, f: StatusFilter) => {
+    if (f === 'all') return true
+    if (f === '2xx') return code >= 200 && code < 300
+    if (f === '3xx') return code >= 300 && code < 400
+    if (f === '4xx') return code >= 400 && code < 500
+    if (f === '5xx') return code >= 500 && code < 600
+    return true
+  }
+
   const filtered = useMemo(() =>
-    query ? data.hosts.filter((h) =>
-      h.url.toLowerCase().includes(query.toLowerCase()) ||
-      h.title.toLowerCase().includes(query.toLowerCase()) ||
-      h.tech.some((t) => t.toLowerCase().includes(query.toLowerCase()))
-    ) : data.hosts
-  , [data.hosts, query])
+    data.hosts.filter((h) => {
+      if (!statusMatch(h.status, statusFilter)) return false
+      if (!query) return true
+      const q = query.toLowerCase()
+      return h.url.toLowerCase().includes(q) ||
+        h.title.toLowerCase().includes(q) ||
+        h.tech.some((t) => t.toLowerCase().includes(q))
+    })
+  , [data.hosts, query, statusFilter])
+
+  const STATUS_PILLS: { id: StatusFilter; label: string; bg: string; color: string }[] = [
+    { id: 'all', label: 'all',  bg: 'var(--surface-2)', color: 'var(--text-muted)' },
+    { id: '2xx', label: '2xx',  bg: '#052e16',          color: '#86efac' },
+    { id: '3xx', label: '3xx',  bg: '#082f49',          color: '#7dd3fc' },
+    { id: '4xx', label: '4xx',  bg: '#422006',          color: '#fcd34d' },
+    { id: '5xx', label: '5xx',  bg: '#450a0a',          color: '#fca5a5' },
+  ]
+
+  const countFor = (f: StatusFilter) =>
+    f === 'all' ? data.hosts.length : data.hosts.filter((h) => statusMatch(h.status, f)).length
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="text-sm" style={{ color: 'var(--text-muted)' }}>
-          <span className="font-semibold" style={{ color: 'var(--green)' }}>{data.hosts.length}</span> hosts
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm" style={{ color: 'var(--text-muted)' }}>
+            <span className="font-semibold" style={{ color: 'var(--green)' }}>{data.hosts.length}</span> hosts
+          </span>
+          <div className="flex gap-1 flex-wrap">
+            {STATUS_PILLS.map((p) => {
+              const cnt = countFor(p.id)
+              if (p.id !== 'all' && cnt === 0) return null
+              return (
+                <button key={p.id} type="button"
+                  onClick={() => setStatusFilter(p.id === statusFilter ? 'all' : p.id)}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-semibold transition-colors"
+                  style={{
+                    background: statusFilter === p.id ? p.bg : 'var(--surface-2)',
+                    color: statusFilter === p.id ? p.color : 'var(--text-muted)',
+                    border: `1px solid ${statusFilter === p.id ? p.color + '55' : 'var(--border)'}`,
+                    cursor: 'pointer', fontFamily: 'inherit',
+                  }}>
+                  {p.label}
+                  <span className="font-mono opacity-75">{cnt}</span>
+                </button>
+              )
+            })}
+          </div>
         </div>
         <SearchInput placeholder="Filter hosts…" onChange={setQuery} />
       </div>
@@ -360,17 +437,52 @@ function HostsTab({ data }: { data: ScanData }) {
 
 // ── Tab: URLs ─────────────────────────────────────────────────
 
+type ProtoFilter = 'all' | 'http' | 'https'
+type ExtFilter   = 'all' | '.js' | '.php' | '.json' | '.html' | '.xml' | '.txt' | '.asp' | '.aspx'
+
+const EXT_LIST: ExtFilter[] = ['all', '.js', '.php', '.json', '.html', '.xml', '.txt', '.asp', '.aspx']
+
 function UrlsTab({ data }: { data: ScanData }) {
   const [query, setQuery] = useState('')
   const [showParamsOnly, setShowParamsOnly] = useState(false)
+  const [proto, setProto] = useState<ProtoFilter>('all')
+  const [ext, setExt] = useState<ExtFilter>('all')
+
   const source = showParamsOnly ? data.paramUrls : data.urls
-  const filtered = useMemo(() =>
-    query ? source.filter((u) => u.toLowerCase().includes(query.toLowerCase())) : source
-  , [source, query])
+
+  const filtered = useMemo(() => {
+    return source.filter((u) => {
+      if (proto !== 'all' && !u.startsWith(`${proto}://`)) return false
+      if (ext !== 'all') {
+        try {
+          const pathname = new URL(u).pathname.toLowerCase()
+          if (!pathname.endsWith(ext)) return false
+        } catch { return false }
+      }
+      if (query && !u.toLowerCase().includes(query.toLowerCase())) return false
+      return true
+    })
+  }, [source, query, proto, ext])
+
   const shown = filtered.slice(0, 500)
 
+  // Only show ext pills that have at least 1 match in current source
+  const extCounts = useMemo(() => {
+    const counts: Partial<Record<ExtFilter, number>> = { all: source.length }
+    for (const e of EXT_LIST.slice(1)) {
+      counts[e] = source.filter((u) => {
+        try { return new URL(u).pathname.toLowerCase().endsWith(e) } catch { return false }
+      }).length
+    }
+    return counts
+  }, [source])
+
+  const httpCount  = source.filter((u) => u.startsWith('http://')).length
+  const httpsCount = source.filter((u) => u.startsWith('https://')).length
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
+      {/* ── row 1: stats + params toggle ─────────────────────────────── */}
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-3 text-sm">
           <span style={{ color: 'var(--text-muted)' }}>
@@ -388,6 +500,47 @@ function UrlsTab({ data }: { data: ScanData }) {
           </button>
         </div>
         <SearchInput placeholder="Filter URLs…" onChange={setQuery} />
+      </div>
+
+      {/* ── row 2: protocol + extension pills ────────────────────────── */}
+      <div className="flex flex-wrap gap-1.5 items-center">
+        {/* protocol */}
+        {([
+          { id: 'all'   as ProtoFilter, label: 'all',   cnt: source.length },
+          { id: 'https' as ProtoFilter, label: 'https', cnt: httpsCount },
+          { id: 'http'  as ProtoFilter, label: 'http',  cnt: httpCount  },
+        ]).filter(p => p.id === 'all' || p.cnt > 0).map((p) => (
+          <button key={p.id} type="button"
+            onClick={() => setProto(p.id === proto ? 'all' : p.id)}
+            className="flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-semibold transition-colors"
+            style={{
+              background: proto === p.id ? '#0c2a1a' : 'var(--surface-2)',
+              color:      proto === p.id ? '#86efac'  : 'var(--text-muted)',
+              border:    `1px solid ${proto === p.id ? '#86efac55' : 'var(--border)'}`,
+              cursor: 'pointer', fontFamily: 'inherit',
+            }}>
+            {p.label}
+            <span className="font-mono opacity-75">{p.cnt}</span>
+          </button>
+        ))}
+
+        <span style={{ color: 'var(--border)', fontSize: 10 }}>│</span>
+
+        {/* extensions */}
+        {EXT_LIST.filter((e) => e === 'all' || (extCounts[e] ?? 0) > 0).map((e) => (
+          <button key={e} type="button"
+            onClick={() => setExt(e === ext ? 'all' : e)}
+            className="flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-semibold transition-colors"
+            style={{
+              background: ext === e ? '#1e1a4c' : 'var(--surface-2)',
+              color:      ext === e ? '#c084fc'  : 'var(--text-muted)',
+              border:    `1px solid ${ext === e ? '#c084fc55' : 'var(--border)'}`,
+              cursor: 'pointer', fontFamily: 'inherit',
+            }}>
+            {e === 'all' ? 'all ext' : e}
+            {e !== 'all' && <span className="font-mono opacity-75">{extCounts[e]}</span>}
+          </button>
+        ))}
       </div>
 
       <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
@@ -433,17 +586,16 @@ function FindingList({ items, borderColor, textColor, maxH = '40vh' }: {
   )
 }
 
+type VulnFilter = 'all' | 'critical' | 'high' | 'medium' | 'low' | 'info' | 'xss' | 'cors' | 'headers' | 'email' | 'zone'
+
 function VulnsTab({ data }: { data: ScanData }) {
+  const [filter, setFilter] = useState<VulnFilter>('all')
   const sevs = ['critical', 'high', 'medium', 'low', 'info'] as const
   const nucleiTotal = sevs.reduce((acc, s) => acc + data.nuclei[s].length, 0)
 
   const hasAny =
-    nucleiTotal > 0 ||
-    data.dalfox.length > 0 ||
-    data.securityHeaders.length > 0 ||
-    data.emailSecurity.length > 0 ||
-    data.corsFindings.length > 0 ||
-    data.zoneTransfer.length > 0
+    nucleiTotal > 0 || data.dalfox.length > 0 || data.securityHeaders.length > 0 ||
+    data.emailSecurity.length > 0 || data.corsFindings.length > 0 || data.zoneTransfer.length > 0
 
   if (!hasAny) {
     return (
@@ -452,7 +604,6 @@ function VulnsTab({ data }: { data: ScanData }) {
     )
   }
 
-  // Colour by severity prefix [high] / [medium] / [low] / [info]
   function sevColor(line: string): string {
     if (line.startsWith('[high]') || line.startsWith('[critical]')) return '#f87171'
     if (line.startsWith('[medium]')) return '#fb923c'
@@ -460,11 +611,46 @@ function VulnsTab({ data }: { data: ScanData }) {
     return 'var(--text-muted)'
   }
 
+  // Filter pill config
+  const ALL_PILLS: { id: VulnFilter; label: string; count: number; color: string; bg: string }[] = [
+    { id: 'all',     label: 'all',      count: nucleiTotal + data.dalfox.length + data.securityHeaders.length + data.emailSecurity.length + data.corsFindings.length + data.zoneTransfer.length, color: 'var(--text-muted)', bg: 'var(--surface-2)' },
+    { id: 'critical',label: 'critical', count: data.nuclei.critical.length, color: '#fca5a5', bg: '#450a0a' },
+    { id: 'high',    label: 'high',     count: data.nuclei.high.length,     color: '#fdba74', bg: '#431407' },
+    { id: 'medium',  label: 'medium',   count: data.nuclei.medium.length,   color: '#fcd34d', bg: '#422006' },
+    { id: 'low',     label: 'low',      count: data.nuclei.low.length,      color: '#86efac', bg: '#052e16' },
+    { id: 'info',    label: 'info',     count: data.nuclei.info.length,     color: '#c084fc', bg: '#0d0b1e' },
+    { id: 'xss',     label: 'xss',      count: data.dalfox.length,          color: '#fca5a5', bg: '#450a0a' },
+    { id: 'cors',    label: 'cors',     count: data.corsFindings.length,    color: '#fdba74', bg: '#431407' },
+    { id: 'headers', label: 'headers',  count: data.securityHeaders.length, color: '#7dd3fc', bg: '#0c1f35' },
+    { id: 'email',   label: 'email',    count: data.emailSecurity.length,   color: '#c4b5fd', bg: '#1e0a4a' },
+    { id: 'zone',    label: 'zone',     count: data.zoneTransfer.length,    color: '#fca5a5', bg: '#450a0a' },
+  ]
+  const pills = ALL_PILLS.filter(p => p.count > 0)
+
+  const show = (id: VulnFilter) => filter === 'all' || filter === id
+
   return (
     <div className="space-y-4">
+      {/* ── Filter bar ─────────────────────────────────────────────────────── */}
+      <div className="flex flex-wrap gap-1.5">
+        {pills.map((p) => (
+          <button key={p.id} type="button"
+            onClick={() => setFilter(p.id === filter ? 'all' : p.id)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors"
+            style={{
+              background: filter === p.id ? p.bg : 'var(--surface-2)',
+              color: filter === p.id ? p.color : 'var(--text-muted)',
+              border: `1px solid ${filter === p.id ? p.color + '55' : 'var(--border)'}`,
+              cursor: 'pointer', fontFamily: 'inherit',
+            }}>
+            {p.label}
+            <span className="font-mono opacity-75">{p.count}</span>
+          </button>
+        ))}
+      </div>
 
-      {/* Email Security */}
-      {data.emailSecurity.length > 0 && (
+      {/* ── Email Security ─────────────────────────────────────────────────── */}
+      {show('email') && data.emailSecurity.length > 0 && (
         <div className="rounded-xl overflow-hidden" style={{ border: '1px solid #3b1278' }}>
           <div className="flex items-center gap-3 px-4 py-3 border-b" style={{ borderColor: '#3b1278', background: '#1e0a4a' }}>
             <Badge style={{ background: '#3b1278', color: '#c4b5fd' }}>📧</Badge>
@@ -475,16 +661,14 @@ function VulnsTab({ data }: { data: ScanData }) {
           <div className="overflow-y-auto" style={{ maxHeight: '30vh' }}>
             {data.emailSecurity.map((item, i) => (
               <div key={i} className="px-4 py-2 border-b text-xs font-mono break-all"
-                style={{ borderColor: '#3b1278', color: sevColor(item) }}>
-                {item}
-              </div>
+                style={{ borderColor: '#3b1278', color: sevColor(item) }}>{item}</div>
             ))}
           </div>
         </div>
       )}
 
-      {/* Security Headers */}
-      {data.securityHeaders.length > 0 && (
+      {/* ── Security Headers ───────────────────────────────────────────────── */}
+      {show('headers') && data.securityHeaders.length > 0 && (
         <div className="rounded-xl overflow-hidden" style={{ border: '1px solid #1e3a5f' }}>
           <div className="flex items-center gap-3 px-4 py-3 border-b" style={{ borderColor: '#1e3a5f', background: '#0c1f35' }}>
             <Badge style={{ background: '#1e3a5f', color: '#7dd3fc' }}>🔒</Badge>
@@ -495,16 +679,14 @@ function VulnsTab({ data }: { data: ScanData }) {
           <div className="overflow-y-auto" style={{ maxHeight: '40vh' }}>
             {data.securityHeaders.map((item, i) => (
               <div key={i} className="px-4 py-2 border-b text-xs font-mono break-all"
-                style={{ borderColor: '#1e3a5f', color: sevColor(item) }}>
-                {item}
-              </div>
+                style={{ borderColor: '#1e3a5f', color: sevColor(item) }}>{item}</div>
             ))}
           </div>
         </div>
       )}
 
-      {/* CORS */}
-      {data.corsFindings.length > 0 && (
+      {/* ── CORS ───────────────────────────────────────────────────────────── */}
+      {show('cors') && data.corsFindings.length > 0 && (
         <div className="rounded-xl overflow-hidden" style={{ border: '1px solid #7c2d12' }}>
           <div className="flex items-center gap-3 px-4 py-3 border-b" style={{ borderColor: '#7c2d12', background: '#431407' }}>
             <Badge style={{ background: '#7c2d12', color: '#fdba74' }}>🌐</Badge>
@@ -516,8 +698,8 @@ function VulnsTab({ data }: { data: ScanData }) {
         </div>
       )}
 
-      {/* Zone Transfer */}
-      {data.zoneTransfer.length > 0 && (
+      {/* ── Zone Transfer ──────────────────────────────────────────────────── */}
+      {show('zone') && data.zoneTransfer.length > 0 && (
         <div className="rounded-xl overflow-hidden" style={{ border: '1px solid #7f1d1d' }}>
           <div className="flex items-center gap-3 px-4 py-3 border-b" style={{ borderColor: '#7f1d1d', background: '#450a0a' }}>
             <Badge style={{ background: '#7f1d1d', color: '#fca5a5' }}>🔓</Badge>
@@ -529,9 +711,9 @@ function VulnsTab({ data }: { data: ScanData }) {
         </div>
       )}
 
-      {/* Nuclei */}
+      {/* ── Nuclei by severity ─────────────────────────────────────────────── */}
       {sevs.map((sev) =>
-        data.nuclei[sev].length > 0 ? (
+        show(sev) && data.nuclei[sev].length > 0 ? (
           <div key={sev} className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
             <div className="flex items-center gap-3 px-4 py-3 border-b"
               style={{ borderColor: 'var(--border)', background: 'var(--surface)' }}>
@@ -545,8 +727,8 @@ function VulnsTab({ data }: { data: ScanData }) {
         ) : null
       )}
 
-      {/* Dalfox */}
-      {data.dalfox.length > 0 && (
+      {/* ── Dalfox XSS ─────────────────────────────────────────────────────── */}
+      {show('xss') && data.dalfox.length > 0 && (
         <div className="rounded-xl overflow-hidden" style={{ border: '1px solid #7f1d1d' }}>
           <div className="flex items-center gap-3 px-4 py-3 border-b"
             style={{ borderColor: '#7f1d1d', background: '#450a0a' }}>

@@ -40,9 +40,86 @@ function useDeleteWithConfirm() {
   return { pending, confirm, error, requestDelete, confirmDelete, cancelConfirm: () => setConfirm(null) }
 }
 
+export function RescanButton({
+  domain,
+  projectId,
+  mode,
+  label = 'rescan',
+}: {
+  domain: string
+  projectId: string
+  mode: 'active' | 'passive'
+  label?: string
+}) {
+  const router = useRouter()
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleRescan() {
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/scans/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId,
+          domain,
+          mode,
+          options: {
+            skipScreenshots: false,
+            skipPortscan: false,
+            skipVulnScan: false,
+          },
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setError(data.error || 'Falha ao iniciar rescan')
+      } else {
+        router.push(`/job/${data.id}`)
+        router.refresh()
+      }
+    } catch {
+      setError('Erro de rede')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        disabled={loading}
+        onClick={() => void handleRescan()}
+        className="text-xs px-2 py-1 rounded"
+        style={{
+          background: 'var(--surface-2)',
+          color: 'var(--purple-bright)',
+          border: '1px solid var(--border)',
+          opacity: loading ? 0.6 : 1,
+        }}>
+        {loading ? '...' : label}
+      </button>
+      {error && <span className="text-xs" style={{ color: '#f87171' }}>{error}</span>}
+    </>
+  )
+}
+
 // ---- Delete button for a single job ----
 
-export function DeleteJobButton({ jobId, domain, status }: { jobId: string; domain: string; status: string }) {
+export function DeleteJobButton({
+  jobId,
+  domain,
+  status,
+  label = 'Apagar',
+}: {
+  jobId: string
+  domain: string
+  status: string
+  label?: string
+}) {
   const { pending, confirm, error, requestDelete, confirmDelete, cancelConfirm } = useDeleteWithConfirm()
   const isActive = status === 'running' || status === 'queued' || status === 'paused'
 
@@ -61,7 +138,7 @@ export function DeleteJobButton({ jobId, domain, status }: { jobId: string; doma
           opacity: isActive ? 0.4 : 1,
           cursor: isActive ? 'not-allowed' : 'pointer',
         }}>
-        {pending === jobId ? '...' : 'Apagar'}
+        {pending === jobId ? '...' : label}
       </button>
       {error && <span className="text-xs" style={{ color: '#f87171' }}>{error}</span>}
       {confirm && confirm.id === jobId && (
@@ -73,7 +150,15 @@ export function DeleteJobButton({ jobId, domain, status }: { jobId: string; doma
 
 // ---- Delete button for a scan ----
 
-export function DeleteScanButton({ scanId, domain }: { scanId: string; domain: string }) {
+export function DeleteScanButton({
+  scanId,
+  domain,
+  label = 'Apagar',
+}: {
+  scanId: string
+  domain: string
+  label?: string
+}) {
   const { pending, confirm, error, requestDelete, confirmDelete, cancelConfirm } = useDeleteWithConfirm()
 
   return (
@@ -85,7 +170,7 @@ export function DeleteScanButton({ scanId, domain }: { scanId: string; domain: s
         onClick={(e) => { e.preventDefault(); e.stopPropagation(); requestDelete('scan', scanId, domain) }}
         className="text-xs px-2 py-1 rounded"
         style={{ background: '#450a0a', color: '#fca5a5', border: '1px solid #7f1d1d' }}>
-        {pending === scanId ? '...' : 'Apagar'}
+        {pending === scanId ? '...' : label}
       </button>
       {error && <span className="text-xs" style={{ color: '#f87171' }}>{error}</span>}
       {confirm && confirm.id === scanId && (

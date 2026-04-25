@@ -41,7 +41,10 @@ export interface NucleiFindings {
 }
 
 export interface DiffData {
+  current: string[]
+  previous: string[]
   new: string[]
+  persisted: string[]
   removed: string[]
 }
 
@@ -92,6 +95,28 @@ export interface ScanData extends ScanMeta {
     files: Record<string, DiffData>
   }
   toolLogs: Record<string, ToolLogEntry>
+}
+
+export type ProxyMode = 'single' | 'rotate'
+
+export interface ProxyEntry {
+  url: string              // e.g. "http://1.2.3.4:8080"
+  protocol: string         // http | https | socks4 | socks5
+  latency: number | null   // ms, null = not yet tested
+  valid: boolean
+  lastChecked: string | null
+}
+
+export interface ProxyConfig {
+  enabled: boolean
+  mode: ProxyMode           // 'single' = Burp/manual, 'rotate' = free list rotation
+  // ── single mode ───────────────────────────────────────────
+  http: string              // e.g. "http://127.0.0.1:8080"
+  https: string
+  noProxy: string           // comma-separated bypass hosts
+  // ── rotate mode ───────────────────────────────────────────
+  proxies: ProxyEntry[]     // validated free proxies
+  lastFetched: string | null
 }
 
 export interface ScanJob {

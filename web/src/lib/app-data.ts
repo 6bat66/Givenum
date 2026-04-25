@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
-import type { ProjectMeta, ScanJob } from './types'
+import type { ProjectMeta, ProxyConfig, ScanJob } from './types'
 
 const DEFAULT_PROJECT_ID = 'default'
 
@@ -246,6 +246,31 @@ export function maskApiKeys(keys: Record<string, string>): Record<string, string
       return [key, `${value.slice(0, 4)}••••${value.slice(-4)}`]
     })
   )
+}
+
+export function getProxyFile(): string {
+  return path.join(getConfigDir(), 'proxy.json')
+}
+
+const DEFAULT_PROXY: ProxyConfig = {
+  enabled: false,
+  mode: 'single',
+  http: '',
+  https: '',
+  noProxy: '',
+  proxies: [],
+  lastFetched: null,
+}
+
+export function readProxyConfig(): ProxyConfig {
+  const saved = readJson<Partial<ProxyConfig>>(getProxyFile(), {})
+  return { ...DEFAULT_PROXY, ...saved, proxies: (saved as ProxyConfig).proxies ?? [] }
+}
+
+export function writeProxyConfig(cfg: ProxyConfig) {
+  if (!writeJson(getProxyFile(), cfg)) {
+    throw new Error('Failed to save proxy config')
+  }
 }
 
 export function createJob(input: Omit<ScanJob, 'id' | 'createdAt'>): ScanJob {

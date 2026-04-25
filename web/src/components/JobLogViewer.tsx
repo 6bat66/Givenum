@@ -270,6 +270,7 @@ export default function JobLogViewer({ initialJob, initialLog }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const logSizeRef = useRef(0)
+  const pollInFlightRef = useRef(false)
 
   const renderedLog = useMemo(() => renderAnsiToHtml(log), [log])
   const isFinished = job.status === 'completed' || job.status === 'failed' || job.status === 'stopped'
@@ -324,6 +325,12 @@ export default function JobLogViewer({ initialJob, initialLog }: Props) {
     let cancelled = false
 
     const poll = async () => {
+      // Prevent overlapping polls: if a previous poll hasn't finished yet,
+      // skip this tick.  Without this guard, multiple in-flight polls all
+      // read the same logSizeRef offset and each append the same chunk,
+      // producing N-times duplication of lines written near that boundary.
+      if (pollInFlightRef.current) return
+      pollInFlightRef.current = true
       try {
         const currentOffset = logSizeRef.current
         const next = await fetchJobState(job.id, currentOffset)
@@ -340,6 +347,8 @@ export default function JobLogViewer({ initialJob, initialLog }: Props) {
       } catch (err) {
         if (cancelled) return
         setError(err instanceof Error ? err.message : 'Falha ao atualizar log')
+      } finally {
+        pollInFlightRef.current = false
       }
     }
 
