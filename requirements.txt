@@ -1,0 +1,9 @@
+# Runtime Python dependencies for GivEnum.py.
+# Install with: pip install --break-system-packages -r requirements.txt
+# (or in a venv: pip install -r requirements.txt)
+
+requests>=2.31.0
+dnspython>=2.4.0
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+urllib3>=2.0.0
