@@ -14,8 +14,26 @@ import logging
 import time
 import platform
 import requests
+import urllib3.util.connection as _urllib3_conn
 import re
 import threading
+
+# Force IPv4 for all Python requests/urllib3 calls.
+#
+# Why: in Docker, many target hosts publish AAAA records that point to IPv6
+# addresses unreachable from the container's bridge network. When `requests`
+# resolves both A and AAAA, it may try the AAAA first and fail with
+#   [Errno 101] Network is unreachable
+# or
+#   [Errno 111] Connection refused
+# while the Go-based tools (httpx, subfinder, dnsx) don't have this problem
+# because they use their own resolver and prefer IPv4.
+#
+# Concretely this bug killed crt.sh / VirusTotal / AlienVault mid-scan and
+# made git-dump / JS-download report 0/50 successes for 4 scans in a row
+# (bscash, tesla x2, paypal). Disabling IPv6 at the urllib3 layer is a
+# one-line fix that costs us only true IPv6-only hosts (<0.1% of the web).
+_urllib3_conn.HAS_IPV6 = False
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Optional, Set, Tuple
