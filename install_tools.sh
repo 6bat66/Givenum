@@ -335,9 +335,7 @@ go_install "github.com/sensepost/gowitness@latest" "gowitness"
 
 header "URL COLLECTION TOOLS"
 
-go_install "github.com/hueristiq/xurlfind3r/cmd/xurlfind3r@latest" "xurlfind3r"
 go_install "github.com/lc/gau/v2/cmd/gau@latest" "gau"
-go_install "github.com/tomnomnom/waybackurls@latest" "waybackurls"
 go_install "github.com/projectdiscovery/urlfinder/cmd/urlfinder@latest" "urlfinder"
 go_install "github.com/hakluke/hakrawler@latest" "hakrawler"
 go_install "github.com/projectdiscovery/katana/cmd/katana@latest" "katana"
@@ -562,7 +560,7 @@ fi
 header "VERIFICATION"
 
 CRITICAL=("subfinder" "httpx" "dnsx")
-RECOMMENDED=("puredns" "massdns" "xurlfind3r" "gau" "waybackurls" "hakrawler" "meg" "nuclei" "dalfox" "sdlookup" "anew" "uro")
+RECOMMENDED=("puredns" "massdns" "urlfinder" "gau" "hakrawler" "meg" "nuclei" "dalfox" "sdlookup" "anew" "uro")
 OPTIONAL_LIST=("gowitness" "arjun" "subzy" "goop" "git-dumper" "amass" "findomain")
 
 MISSING_CRITICAL=()

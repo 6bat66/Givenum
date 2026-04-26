@@ -414,7 +414,7 @@ class ToolChecker:
         'subdomain': ['subfinder', 'assetfinder', 'findomain', 'amass', 'knockpy', 'github-subdomains', 'uncover'],
         'dns': ['dnsx', 'puredns', 'massdns', 'tlsx'],
         'http': ['httpx', 'hakcheckurl'],
-        'url_collect': ['urlfinder', 'xurlfind3r', 'waybackurls', 'gau', 'hakrawler', 'katana', 'meg'],
+        'url_collect': ['urlfinder', 'gau', 'hakrawler', 'katana', 'meg'],
         'js_analysis': ['subjs', 'jsubfinder', 'getJS', 'trufflehog'],
         'utils': ['anew', 'uro', 'unfurl', 'qsreplace', 'freq'],
         'scanning': ['nuclei', 'sdlookup'],
@@ -464,7 +464,7 @@ class ToolChecker:
     CRITICAL_ACTIVE  = ['naabu', 'nuclei']
 
     # P1 — recommended; scan can run but loses a meaningful capability.
-    RECOMMENDED_PASSIVE = ['amass', 'assetfinder', 'urlfinder', 'gau', 'waybackurls', 'katana', 'gowitness']
+    RECOMMENDED_PASSIVE = ['amass', 'assetfinder', 'urlfinder', 'gau', 'katana', 'gowitness']
     RECOMMENDED_ACTIVE  = ['ffuf', 'dalfox', 'subzy']
 
     @classmethod
@@ -1769,7 +1769,7 @@ class URLCollector:
         return hosts[:limit] if limit else hosts
 
     def _archive_targets(self, input_file: Path, cap: int = 12) -> List[str]:
-        """Build target list for archive lookups (gau/waybackurls).
+        """Build target list for archive lookups (gau).
 
         Always includes apex + www; then fills remaining slots with unique
         active hosts from httpx output. Archive sources are domain-level, so
@@ -1830,110 +1830,6 @@ class URLCollector:
             if match and match.group(2) == '200':
                 urls.add(match.group(1))
         return urls
-
-    def collect_with_xurlfind3r(self, input_file: Path) -> Set[str]:
-        """Collect URLs using xurlfind3r (modern, efficient)"""
-        if not ToolChecker.check_tool('xurlfind3r'):
-            Logger.warning("xurlfind3r not found")
-            return set()
-        
-        Logger.info("Collecting URLs with xurlfind3r...")
-        output_file = self.output_mgr.get_path('urls', 'xurlfind3r.txt')
-        log_file = self.output_mgr.get_path('logs', 'xurlfind3r.log')
-
-        # Total wall-clock budget — prevents 30 hosts × 90 s/host = 2700 s worst case.
-        # Once budget is exhausted, remaining hosts are skipped and status → partial.
-        _TOTAL_BUDGET = 300   # seconds
-
-        # xurlfind3r hits archive APIs (OTX/URLScan/Wayback/CommonCrawl) directly.
-        # Routing via the shared proxy turns low-data hosts into 45-second hangs.
-        _direct_env = {k: v for k, v in os.environ.items()
-                       if k.upper() not in ('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY',
-                                            'http_proxy', 'https_proxy', 'all_proxy')}
-
-        try:
-            domains = self._load_hosts(input_file, limit=30)
-            if not domains:
-                _tool_log['xurlfind3r'] = {'status': 'ok', 'rc': 0, 'elapsed': 0, 'hosts': 0, 'timeouts': 0, 'failures': 0}
-                with open(output_file, 'w') as f:
-                    f.write('')
-                Logger.success("xurlfind3r: 0 URLs (no hosts to process)")
-                return set()
-
-            all_urls = set()
-            _t0 = time.time()
-            timeouts = 0
-            failures = 0
-            skipped = 0
-
-            for idx, domain in enumerate(domains, start=1):
-                # Bail out early if total budget exceeded
-                if time.time() - _t0 > _TOTAL_BUDGET:
-                    skipped = len(domains) - idx + 1
-                    Logger.warning(
-                        f"xurlfind3r: budget {_TOTAL_BUDGET}s reached at host {idx}/{len(domains)} "
-                        f"— skipping {skipped} remaining hosts"
-                    )
-                    break
-
-                try:
-                    result = subprocess.run(
-                        ['xurlfind3r', '-d', domain, '--silent'],
-                        capture_output=True,
-                        text=True,
-                        timeout=20,   # tighter per-host timeout (was 45s)
-                        env=_direct_env,
-                    )
-                    self._append_log(log_file, f"{domain} (rc={result.returncode})", result.stderr)
-
-                    if result.returncode != 0:
-                        failures += 1
-                        Logger.warning(f"xurlfind3r [{idx}/{len(domains)}] failed on {domain} (rc={result.returncode})")
-                        continue
-
-                    urls = set(line.strip() for line in result.stdout.split('\n') if line.strip())
-                    all_urls.update(urls)
-                    if idx == 1 or idx == len(domains) or idx % 10 == 0:
-                        Logger.info(f"xurlfind3r progress: {idx}/{len(domains)} hosts, {len(all_urls)} URLs")
-
-                except subprocess.TimeoutExpired as e:
-                    timeouts += 1
-                    self._append_log(log_file, f"{domain} (timeout)", (e.stderr or '') if isinstance(e.stderr, str) else '')
-                    Logger.warning(f"xurlfind3r timeout on {domain} [{idx}/{len(domains)}]")
-                except Exception as e:
-                    failures += 1
-                    self._append_log(log_file, f"{domain} (error)", str(e))
-                    Logger.warning(f"xurlfind3r error on {domain}: {e}")
-
-            # Force partial if budget was hit or many hosts failed
-            processed = len(domains) - skipped
-            status, rc = self._summarize_batch_status(processed, failures, timeouts)
-            if skipped > 0:
-                status = 'partial'
-            _tool_log['xurlfind3r'] = {
-                'status': status,
-                'rc': rc,
-                'elapsed': round(time.time() - _t0, 1),
-                'hosts': len(domains),
-                'timeouts': timeouts,
-                'failures': failures,
-                'skipped': skipped,
-                'urls': len(all_urls),
-            }
-
-            with open(output_file, 'w') as f:
-                f.write('\n'.join(sorted(all_urls)) + '\n')
-
-            Logger.success(
-                f"xurlfind3r: {len(all_urls)} URLs "
-                f"(hosts={len(domains)}, timeouts={timeouts}, skipped={skipped})"
-            )
-            return all_urls
-
-        except Exception as e:
-            _tool_log['xurlfind3r'] = {'status': 'error', 'rc': -1, 'elapsed': 0, 'msg': str(e)}
-            Logger.error(f"Error in xurlfind3r: {e}")
-            return set()
 
     def collect_with_katana(self, input_file: Path) -> Set[str]:
         """Crawl URLs with katana (ProjectDiscovery)"""
@@ -2171,90 +2067,6 @@ class URLCollector:
             all_subs_file.write_text('\n'.join(merged) + '\n')
             Logger.success(f"gau harvested {len(new_subs)} new subdomains from archived URLs")
 
-    def _collect_with_waybackurls(self, input_file: Path) -> Set[str]:
-        """Fetch archived URLs with waybackurls — root + www + active hosts."""
-        if not ToolChecker.check_tool('waybackurls'):
-            return set()
-
-        wayback_file = self.output_mgr.get_path('urls', 'waybackurls.txt')
-        wayback_log  = self.output_mgr.get_path('logs', 'waybackurls.log')
-        targets  = self._archive_targets(input_file, cap=12)
-
-        # waybackurls → Wayback Machine direct. Free proxies break it.
-        _direct_env = {k: v for k, v in os.environ.items()
-                       if k.upper() not in ('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY',
-                                            'http_proxy', 'https_proxy', 'all_proxy')}
-
-        urls: set[str] = set()
-        timeouts = failures = skipped = 0
-        _BUDGET = 300           # total wall-clock budget
-        _t0 = time.time()
-
-        for domain in targets:
-            remaining = _BUDGET - (time.time() - _t0)
-            if remaining < 20:
-                skipped += 1
-                Logger.warning(f"waybackurls: budget exhausted, skipping {domain}")
-                continue
-            try:
-                result = subprocess.run(
-                    ['waybackurls', domain],
-                    capture_output=True, text=True,
-                    timeout=min(120, int(remaining)),
-                    env=_direct_env,
-                )
-                self._append_log(wayback_log, f"{domain} (rc={result.returncode})", result.stderr)
-                if result.returncode != 0:
-                    failures += 1
-                    Logger.warning(f"waybackurls failed on {domain} (rc={result.returncode})")
-                else:
-                    batch = {l.strip() for l in result.stdout.splitlines() if l.strip()}
-                    urls.update(batch)
-                    Logger.info(f"waybackurls: {domain} → {len(batch)} URLs")
-            except subprocess.TimeoutExpired:
-                timeouts += 1
-                self._append_log(wayback_log, f"{domain} (timeout)", '')
-                Logger.warning(f"waybackurls timeout on {domain}")
-            except Exception as e:
-                failures += 1
-                Logger.warning(f"waybackurls error on {domain}: {e}")
-
-        status, rc = self._summarize_batch_status(len(targets), failures, timeouts)
-        if skipped > 0:
-            status = 'partial'
-
-        # Heuristic: waybackurls returns rc=0 + empty stdout silently when the
-        # Wayback CDX endpoint rate-limits it (503/429 swallowed upstream).
-        # If we processed ≥3 hosts with 0 URLs and avg time <1s/host, it is
-        # almost certainly throttled, not genuinely empty.
-        elapsed = round(time.time() - _t0, 1)
-        processed = len(targets) - skipped
-        rate_limited = (
-            processed >= 3 and len(urls) == 0
-            and elapsed / max(processed, 1) < 1.0
-        )
-        if rate_limited:
-            status = 'partial'
-            Logger.warning(
-                f"waybackurls: 0 URLs in {elapsed}s across {processed} hosts — "
-                "likely throttled by Wayback Machine CDX (silent upstream 429/503)"
-            )
-            self._append_log(
-                wayback_log,
-                'diagnostic',
-                f"All {processed} hosts returned 0 URLs in {elapsed}s "
-                "(<1s/host). waybackurls swallows upstream 429/503 — treat as rate-limited."
-            )
-
-        _tool_log['waybackurls'] = {'status': status, 'rc': rc,
-                                    'elapsed': elapsed,
-                                    'timeouts': timeouts, 'failures': failures,
-                                    'skipped': skipped, 'urls': len(urls),
-                                    'rate_limited': rate_limited}
-        wayback_file.write_text('\n'.join(sorted(urls)) + '\n')
-        Logger.success(f"waybackurls: {len(urls)} URLs (hosts={len(targets)}, timeouts={timeouts}, skipped={skipped})")
-        return urls
-
     def collect_with_urlfinder(self, input_file: Path) -> Set[str]:
         """Collect URLs with urlfinder (ProjectDiscovery's high-speed passive collector).
 
@@ -2384,22 +2196,22 @@ class URLCollector:
         _lock = threading.Lock()
 
         # All sources run concurrently — each has its own internal budget/timeout.
-        # urlfinder (PD) is the new primary archive collector (unifies wayback+otx
-        # +commoncrawl with proper retry/rate-limit). gau and waybackurls are kept
-        # as fallback while we validate urlfinder's yield over a few real scans;
-        # they will be pruned in a follow-up commit (see TASK #49).
-        # xurlfind3r / katana / hakrawler crawl the live host list directly.
+        # Archive collectors: urlfinder (PD) is primary, gau is healthy backup.
+        # Live crawlers: katana + hakrawler crawl the host list directly.
+        #
+        # waybackurls and xurlfind3r were removed (TASK #23/#24) after returning
+        # 0 URLs in 4/4 real scans (bscash, tesla x2, paypal). urlfinder + gau
+        # already cover Wayback/OTX/CommonCrawl. To resurrect either, see
+        # `git log --diff-filter=D --name-only -- GivEnum.py`.
         _crawlers = [
             ('urlfinder',    self.collect_with_urlfinder,     input_file),
             ('gau',          self._collect_with_gau,          input_file),
-            ('waybackurls',  self._collect_with_waybackurls,  input_file),
-            ('xurlfind3r',   self.collect_with_xurlfind3r,    input_file),
             ('katana',       self.collect_with_katana,        input_file),
             ('hakrawler',    self.collect_with_hakrawler,     input_file),
         ]
 
         Logger.info(f"Launching {len(_crawlers)} URL sources in parallel "
-                    f"(urlfinder/gau/wayback: archive  |  xurlfind3r/katana/hakrawler: live crawl)…")
+                    f"(urlfinder/gau: archive  |  katana/hakrawler: live crawl)…")
 
         with ThreadPoolExecutor(max_workers=len(_crawlers)) as executor:
             futures = {executor.submit(fn, arg): name for name, fn, arg in _crawlers}

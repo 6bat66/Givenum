@@ -73,11 +73,9 @@ RUN go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest && 
 RUN go install github.com/d3mondev/puredns/v2@latest 2>/dev/null || echo "[!] puredns failed (non-critical)"
 RUN go install github.com/hakluke/hakcheckurl@latest 2>/dev/null || echo "[!] hakcheckurl failed (non-critical)"
 RUN go install github.com/sensepost/gowitness@latest 2>/dev/null || echo "[!] gowitness failed (non-critical)"
-RUN go install github.com/hueristiq/xurlfind3r/cmd/xurlfind3r@latest 2>/dev/null || echo "[!] xurlfind3r failed (non-critical)"
 RUN go install github.com/lc/gau/v2/cmd/gau@latest 2>/dev/null || echo "[!] gau failed (non-critical)"
-RUN go install github.com/tomnomnom/waybackurls@latest 2>/dev/null || echo "[!] waybackurls failed (non-critical)"
-# urlfinder: PD's high-speed passive URL collector (replaces gau/wayback when
-# those are silently throttled — see TASK #41 in the audit backlog).
+# urlfinder: PD's high-speed passive URL collector. Replaced waybackurls and
+# xurlfind3r (TASKS #23/#24 — both returned 0 URLs in 4 real scans).
 RUN go install github.com/projectdiscovery/urlfinder/cmd/urlfinder@latest 2>/dev/null || echo "[!] urlfinder failed (non-critical)"
 RUN go install github.com/hakluke/hakrawler@latest 2>/dev/null || echo "[!] hakrawler failed (non-critical)"
 RUN go install github.com/projectdiscovery/katana/cmd/katana@latest 2>/dev/null || echo "[!] katana failed (non-critical)"
@@ -186,7 +184,7 @@ RUN set -e; \
     done; \
     echo ""; \
     echo "── RECOMMENDED (warned but not fatal) ──"; \
-    for t in amass assetfinder findomain gowitness gau waybackurls urlfinder katana hakrawler subjs subzy dalfox subjack tlsx puredns massdns trufflehog uncover ffuf gf; do \
+    for t in amass assetfinder findomain gowitness gau urlfinder katana hakrawler subjs subzy dalfox subjack tlsx puredns massdns trufflehog uncover ffuf gf; do \
       check "$t" || MISSING_RECOMMENDED="$MISSING_RECOMMENDED $t"; \
     done; \
     echo ""; \
