@@ -1720,8 +1720,13 @@ class HTTPProber:
 class URLCollector:
     """Advanced URL collection with modern tools"""
 
-    def __init__(self, output_mgr: OutputManager):
+    def __init__(self, output_mgr: OutputManager, domain: str = ''):
         self.output_mgr = output_mgr
+        # `domain` is the target root used by zone-level archive collectors
+        # (currently urlfinder; see collect_with_urlfinder). Defaults to ''
+        # for backward compat with any caller that doesn't pass it — those
+        # paths simply skip domain-aware collectors with a clear log msg.
+        self.domain = domain
 
     @staticmethod
     def _extract_host(value: str) -> str:
@@ -2260,6 +2265,17 @@ class URLCollector:
             Logger.warning("urlfinder not found, skipping (install via /settings/tools)")
             record_tool_log('urlfinder', {
                 'status': 'not_found', 'rc': -1, 'elapsed': 0,
+            })
+            return set()
+
+        if not self.domain:
+            Logger.warning(
+                "urlfinder skipped — URLCollector was instantiated without a "
+                "domain (caller bug). Pass URLCollector(output_mgr, domain)."
+            )
+            record_tool_log('urlfinder', {
+                'status': 'skipped', 'rc': 0, 'elapsed': 0,
+                'msg': 'no domain passed to URLCollector',
             })
             return set()
 
@@ -4808,7 +4824,7 @@ class GivEnum:
         self.dns_resolver = DNSResolver(self.output_mgr)
         self.port_scanner = PortScanner(self.output_mgr)
         self.http_prober = HTTPProber(self.output_mgr)
-        self.url_collector = URLCollector(self.output_mgr)
+        self.url_collector = URLCollector(self.output_mgr, self.domain)
         self.js_analyzer = JSAnalyzer(self.output_mgr)
         self.git_dumper = GitDumper(self.output_mgr)
         self.vuln_scanner    = VulnScanner(self.output_mgr)
