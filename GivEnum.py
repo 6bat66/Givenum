@@ -2237,13 +2237,24 @@ class URLCollector:
 
         urlfinder unifies multiple archive sources (Wayback, Common Crawl,
         AlienVault OTX, etc.) behind PD's retryable HTTP client and rate-limiter.
-        Replaces the gau+waybackurls combo when those are silently throttled
-        (the bscash.com.br scan saw waybackurls return 0 URLs across 12 hosts
-        in 0.6s — a clear silent-throttle signature).
 
-        We pass the host list via -list so the tool runs ONE batch, instead of
-        looping host-by-host with per-host timeouts (which is how xurlfind3r
-        burns budget on slow hosts).
+        Why -d (root domain) instead of -list (host list)?
+        urlfinder's archive sources are *zone-level*: querying `tesla.com` already
+        returns URLs from every subdomain found in Wayback/CC/etc. The first
+        integration used `-list` on the host file, which made urlfinder do
+        N redundant zone queries (one per host) — and apparently triggered
+        provider-side throttling, returning 0 URLs in 600 s on both bscash and
+        tesla. The official upstream example (`urlfinder -d tesla.com`)
+        finishes in ~2.5 min with ~200k URLs.
+
+        Why -all? Without it urlfinder only enables the small subset of
+        providers that don't need a key — usually nothing useful comes back.
+        `-all` enables every source the binary knows about; the ones that
+        require keys silently skip if no provider-config.yaml is present.
+
+        We still filter results to the configured domain just in case a
+        provider returns out-of-scope URLs, since the orchestrator hands the
+        whole URL set to downstream tools (gf, nuclei, dalfox).
         """
         if not ToolChecker.check_tool('urlfinder'):
             Logger.warning("urlfinder not found, skipping (install via /settings/tools)")
@@ -2252,17 +2263,22 @@ class URLCollector:
             })
             return set()
 
-        Logger.info("Collecting URLs with urlfinder (PD)...")
+        Logger.info(f"Collecting URLs with urlfinder (PD) for -d {self.domain} -all ...")
         output_file = self.output_mgr.get_path('urls', 'urlfinder.txt')
         log_file    = self.output_mgr.get_path('logs', 'urlfinder.log')
-        budget_s    = 600  # 10-minute hard cap for the whole batch
+        budget_s    = 600  # 10-minute hard cap
+
+        # input_file is unused — kept in the signature for parity with the
+        # other collectors so the orchestrator's `_crawlers` dict stays uniform.
+        _ = input_file
 
         t0 = time.time()
         try:
             with open(log_file, 'w') as lf:
                 result = subprocess.run(
                     ['urlfinder',
-                     '-list',   str(input_file),
+                     '-d',      self.domain,
+                     '-all',
                      '-o',      str(output_file),
                      '-silent'],
                     stderr=lf,
@@ -2271,22 +2287,43 @@ class URLCollector:
                 )
             elapsed = round(time.time() - t0, 1)
 
+            # Parse + filter to scope. Some providers (especially OTX) leak
+            # cross-zone URLs; trust matches_domain() as the gatekeeper.
             urls: Set[str] = set()
+            in_scope_count = 0
+            out_of_scope_count = 0
             if output_file.exists():
                 with open(output_file, 'r') as f:
                     for raw in f:
                         line = raw.strip()
-                        if line:
+                        if not line:
+                            continue
+                        try:
+                            host = urlparse(line).hostname or ''
+                        except Exception:
+                            host = ''
+                        if host and matches_domain(host, self.domain):
                             urls.add(line)
+                            in_scope_count += 1
+                        else:
+                            out_of_scope_count += 1
 
             status = 'ok' if result.returncode == 0 else 'partial'
             record_tool_log('urlfinder', {
-                'status':  status,
-                'rc':      result.returncode,
-                'elapsed': elapsed,
-                'urls':    len(urls),
+                'status':       status,
+                'rc':           result.returncode,
+                'elapsed':      elapsed,
+                'urls':         len(urls),
+                'in_scope':     in_scope_count,
+                'out_of_scope': out_of_scope_count,
             })
-            Logger.success(f"urlfinder: {len(urls)} URLs in {elapsed}s")
+            if out_of_scope_count:
+                Logger.success(
+                    f"urlfinder: {len(urls)} in-scope URLs in {elapsed}s "
+                    f"({out_of_scope_count} out-of-scope filtered)"
+                )
+            else:
+                Logger.success(f"urlfinder: {len(urls)} URLs in {elapsed}s")
             return urls
 
         except subprocess.TimeoutExpired:
