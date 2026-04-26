@@ -80,19 +80,6 @@ docker compose up app --build
 docker compose run --rm scanner -d example.com --active
 ```
 
-### Analysis
-
-```bash
-# Analyze results
-python3 analyze_results.py results/example.com_20250122_123456/
-
-# Summary only
-python3 analyze_results.py results/example.com_*/ --summary-only
-
-# Export report
-python3 analyze_results.py results/example.com_*/ --export report.md
-```
-
 ## 📊 One-Liners
 
 ### Find Interesting Assets
@@ -168,7 +155,6 @@ python3 GivEnum.py -d target.com
 
 # Step 2: Review findings
 cat results/target.com_*/reports/report.md
-python3 analyze_results.py results/target.com_*/
 
 # Step 3: Active scan on interesting targets
 python3 GivEnum.py -d api.target.com --active

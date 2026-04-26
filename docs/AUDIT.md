@@ -41,7 +41,7 @@ Tudo é uma **única feature coerente** chamada *Settings + Dashboard v2*. Os ar
 | **Dashboard UX** | `DashboardControls.tsx`, `ManageActions.tsx` (+RescanButton) | Botão de rescan com mesmo modo |
 | **Diff rework** | `lib/results.ts` (refactor), `lib/types.ts` (+DiffData fields) | Calcular diff direto de arquivos atuais vs anteriores em vez de ler `.diff` files |
 | **Reliability** | `JobLogViewer.tsx` (overlap-poll guard), `api/settings/apis/route.ts` (preserve masked keys) | Bug fixes de polling e API key clearing |
-| **Análise** | `analyze_results.py` (NEW, 536 lines) | Script standalone — separado do core |
+| **Análise** | ~~`analyze_results.py` (536 linhas)~~ — REMOVIDO posteriormente | Era script standalone órfão; deletado por desuso confirmado |
 | **Infra** | `Dockerfile` (+10 ferramentas: naabu, ffuf, byp4xx, kr, jwt-tool, s3scanner, gf, shuffledns, notify, interactsh) | Suporte às novas integrações em GivEnum.py |
 
 **Risco de commitar parcial:**

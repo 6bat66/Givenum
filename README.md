@@ -131,7 +131,6 @@ python3 GivEnum.py --configure-api
 ```
 .
 ├── GivEnum.py                  # main orchestrator (~5k lines, will be modularised)
-├── analyze_results.py          # standalone post-scan analyser
 ├── scan_runner.py              # thin wrapper used by the web UI to spawn a scan
 ├── install_tools.sh            # cross-platform tool installer (macOS / Debian / Kali)
 ├── batch_enum.sh               # CLI multi-domain runner

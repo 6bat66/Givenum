@@ -17,6 +17,7 @@ RUN apt-get update -q && apt-get install -y -q \
     python3 python3-pip python3-venv \
     build-essential libpcap-dev \
     chromium \
+    sqlmap \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
@@ -75,6 +76,9 @@ RUN go install github.com/sensepost/gowitness@latest 2>/dev/null || echo "[!] go
 RUN go install github.com/hueristiq/xurlfind3r/cmd/xurlfind3r@latest 2>/dev/null || echo "[!] xurlfind3r failed (non-critical)"
 RUN go install github.com/lc/gau/v2/cmd/gau@latest 2>/dev/null || echo "[!] gau failed (non-critical)"
 RUN go install github.com/tomnomnom/waybackurls@latest 2>/dev/null || echo "[!] waybackurls failed (non-critical)"
+# urlfinder: PD's high-speed passive URL collector (replaces gau/wayback when
+# those are silently throttled — see TASK #41 in the audit backlog).
+RUN go install github.com/projectdiscovery/urlfinder/cmd/urlfinder@latest 2>/dev/null || echo "[!] urlfinder failed (non-critical)"
 RUN go install github.com/hakluke/hakrawler@latest 2>/dev/null || echo "[!] hakrawler failed (non-critical)"
 RUN go install github.com/projectdiscovery/katana/cmd/katana@latest 2>/dev/null || echo "[!] katana failed (non-critical)"
 RUN go install github.com/tomnomnom/meg@latest 2>/dev/null || echo "[!] meg failed (non-critical)"
@@ -102,8 +106,24 @@ RUN go install github.com/projectdiscovery/notify/cmd/notify@latest 2>/dev/null 
 RUN go install github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest 2>/dev/null || echo "[!] interactsh-client failed (non-critical)"
 # ── Phase 2 tools ─────────────────────────────────────────────────────────────
 RUN go install github.com/lobuhi/byp4xx@latest 2>/dev/null || echo "[!] byp4xx failed (non-critical)"
-RUN go install github.com/assetnote/kiterunner/cmd/kr@latest 2>/dev/null || echo "[!] kiterunner (kr) failed (non-critical)"
-RUN python3 -m pip install --break-system-packages -q jwt-tool 2>/dev/null || echo "[!] jwt-tool failed (non-critical)"
+
+# kiterunner: `go install …/cmd/kr@latest` fails on the public module path
+# (the repo doesn't expose cmd/kr as a Go-installable module). Build from
+# source via the project's Makefile instead.
+RUN git clone --depth=1 -q https://github.com/assetnote/kiterunner /tmp/kiterunner && \
+    cd /tmp/kiterunner && make build && \
+    cp ./dist/kr /root/go/bin/kr && \
+    rm -rf /tmp/kiterunner \
+    || echo "[!] kiterunner (kr) build failed (non-critical)"
+
+# jwt_tool: the PyPI `jwt-tool` package install often breaks on dep
+# resolution. Cloning ticarpi/jwt_tool is the upstream-recommended path.
+RUN git clone --depth=1 -q https://github.com/ticarpi/jwt_tool /opt/jwt_tool && \
+    pip install --break-system-packages -q -r /opt/jwt_tool/requirements.txt && \
+    printf '#!/bin/sh\nexec python3 /opt/jwt_tool/jwt_tool.py "$@"\n' > /usr/local/bin/jwt_tool && \
+    chmod +x /usr/local/bin/jwt_tool \
+    || echo "[!] jwt_tool install failed (non-critical)"
+
 RUN python3 -m pip install --break-system-packages -q s3scanner 2>/dev/null || echo "[!] s3scanner failed (non-critical)"
 # kiterunner routes wordlist
 RUN mkdir -p /root/.kiterunner && \
@@ -143,6 +163,53 @@ RUN mkdir -p /usr/share/seclists/Discovery/Web-Content && \
       -o /usr/share/seclists/Discovery/Web-Content/common.txt
 
 RUN nuclei -update-templates 2>/dev/null || true
+
+# ── Tool installation verification ──────────────────────────────────────────
+# The previous Dockerfile masked install failures with `|| echo "[!] X failed"`.
+# Failures only surfaced at scan time as "tool not found" warnings, hours later.
+# This stage prints a clear PASS/FAIL table at build time. CRITICAL tools fail
+# the build outright; RECOMMENDED log a warning.
+ARG TOOLS_VERIFY_REV=1
+RUN set -e; \
+    echo ""; \
+    echo "════════════════════════════════════════════════════════"; \
+    echo "  TOOL INSTALLATION VERIFICATION"; \
+    echo "════════════════════════════════════════════════════════"; \
+    MISSING_CRITICAL=""; \
+    MISSING_RECOMMENDED=""; \
+    MISSING_OPTIONAL=""; \
+    check() { command -v "$1" >/dev/null 2>&1 && echo "  [OK]      $1" || { echo "  [MISSING] $1"; return 1; }; }; \
+    echo ""; \
+    echo "── CRITICAL (build fails if any of these are missing) ──"; \
+    for t in subfinder httpx dnsx naabu nuclei; do \
+      check "$t" || MISSING_CRITICAL="$MISSING_CRITICAL $t"; \
+    done; \
+    echo ""; \
+    echo "── RECOMMENDED (warned but not fatal) ──"; \
+    for t in amass assetfinder findomain gowitness gau waybackurls urlfinder katana hakrawler subjs subzy dalfox subjack tlsx puredns massdns trufflehog uncover ffuf gf; do \
+      check "$t" || MISSING_RECOMMENDED="$MISSING_RECOMMENDED $t"; \
+    done; \
+    echo ""; \
+    echo "── OPTIONAL (informational) ──"; \
+    for t in kr jwt_tool s3scanner byp4xx interactsh-client notify shuffledns dnsvalidator goop git-dumper jsubfinder sdlookup; do \
+      check "$t" || MISSING_OPTIONAL="$MISSING_OPTIONAL $t"; \
+    done; \
+    echo ""; \
+    echo "════════════════════════════════════════════════════════"; \
+    if [ -n "$MISSING_CRITICAL" ]; then \
+      echo "[FATAL] Missing critical tools:$MISSING_CRITICAL"; \
+      echo "Build aborted — fix the install commands above."; \
+      exit 1; \
+    fi; \
+    if [ -n "$MISSING_RECOMMENDED" ]; then \
+      echo "[WARN] Missing recommended tools:$MISSING_RECOMMENDED"; \
+      echo "Scans will run but will lose those capabilities."; \
+    fi; \
+    if [ -n "$MISSING_OPTIONAL" ]; then \
+      echo "[INFO] Missing optional tools:$MISSING_OPTIONAL"; \
+    fi; \
+    echo "════════════════════════════════════════════════════════"; \
+    echo ""
 
 COPY web/package.json web/package-lock.json /app/web/
 RUN npm --prefix /app/web ci

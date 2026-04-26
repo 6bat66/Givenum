@@ -33,7 +33,6 @@ export async function POST(req: Request) {
   const workspaceRoot = getWorkspaceRoot()
   const runnerScript = path.join(workspaceRoot, 'scan_runner.py')
   const scannerScript = path.join(workspaceRoot, 'GivEnum.py')
-  const analyzerScript = path.join(workspaceRoot, 'analyze_results.py')
 
   if (!fs.existsSync(workspaceRoot) || !fs.statSync(workspaceRoot).isDirectory()) {
     return NextResponse.json({ error: 'Workspace root is invalid' }, { status: 500 })
@@ -70,7 +69,6 @@ export async function POST(req: Request) {
     runnerScript,
     '--job-file', getJobFile(job.id),
     '--scanner-script', scannerScript,
-    ...(fs.existsSync(analyzerScript) ? ['--analyzer-script', analyzerScript] : []),
     '--domain', domain,
     '--output-dir', outputBaseDir,
     '--config-dir', getConfigDir(),

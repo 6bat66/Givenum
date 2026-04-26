@@ -66,7 +66,6 @@ def main():
     parser = argparse.ArgumentParser(description='Run a GivEnum scan job')
     parser.add_argument('--job-file', required=True)
     parser.add_argument('--scanner-script', required=True)
-    parser.add_argument('--analyzer-script', required=False, default=None)
     parser.add_argument('--domain', required=True)
     parser.add_argument('--output-dir', required=True)
     parser.add_argument('--config-dir', required=True)
@@ -125,18 +124,9 @@ def main():
         log.write(f"\n[{datetime.utcnow().isoformat()}Z] Job finished with rc={proc.returncode}\n")
 
     scan_dir = find_scan_dir(output_dir, args.domain, before)
+    # analyze_results.py was removed (TASK #20). The analysis_file slot in the
+    # job metadata is kept for backward compat but always None now.
     analysis_file = None
-    analyzer_path = Path(args.analyzer_script) if args.analyzer_script else None
-    if proc.returncode == 0 and scan_dir and analyzer_path and analyzer_path.exists():
-        analysis_file = scan_dir / 'reports' / 'analysis.md'
-        with open(log_file, 'a') as log:
-            log.write(f"\n[{datetime.utcnow().isoformat()}Z] Running analyzer\n")
-            subprocess.run(
-                [sys.executable, '-u', str(analyzer_path), str(scan_dir), '--export', str(analysis_file)],
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                env=env,
-            )
 
     current_job = load_job(job_file)
     if current_job and current_job.get('status') == 'stopped':

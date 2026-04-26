@@ -396,7 +396,7 @@ class ToolChecker:
         'subdomain': ['subfinder', 'assetfinder', 'findomain', 'amass', 'knockpy', 'github-subdomains', 'uncover'],
         'dns': ['dnsx', 'puredns', 'massdns', 'tlsx'],
         'http': ['httpx', 'hakcheckurl'],
-        'url_collect': ['xurlfind3r', 'waybackurls', 'gau', 'hakrawler', 'katana', 'meg'],
+        'url_collect': ['urlfinder', 'xurlfind3r', 'waybackurls', 'gau', 'hakrawler', 'katana', 'meg'],
         'js_analysis': ['subjs', 'jsubfinder', 'getJS', 'trufflehog'],
         'utils': ['anew', 'uro', 'unfurl', 'qsreplace', 'freq'],
         'scanning': ['nuclei', 'sdlookup'],
@@ -446,7 +446,7 @@ class ToolChecker:
     CRITICAL_ACTIVE  = ['naabu', 'nuclei']
 
     # P1 — recommended; scan can run but loses a meaningful capability.
-    RECOMMENDED_PASSIVE = ['amass', 'assetfinder', 'gau', 'waybackurls', 'katana', 'gowitness']
+    RECOMMENDED_PASSIVE = ['amass', 'assetfinder', 'urlfinder', 'gau', 'waybackurls', 'katana', 'gowitness']
     RECOMMENDED_ACTIVE  = ['ffuf', 'dalfox', 'subzy']
 
     @classmethod
@@ -2208,6 +2208,79 @@ class URLCollector:
         Logger.success(f"waybackurls: {len(urls)} URLs (hosts={len(targets)}, timeouts={timeouts}, skipped={skipped})")
         return urls
 
+    def collect_with_urlfinder(self, input_file: Path) -> Set[str]:
+        """Collect URLs with urlfinder (ProjectDiscovery's high-speed passive collector).
+
+        urlfinder unifies multiple archive sources (Wayback, Common Crawl,
+        AlienVault OTX, etc.) behind PD's retryable HTTP client and rate-limiter.
+        Replaces the gau+waybackurls combo when those are silently throttled
+        (the bscash.com.br scan saw waybackurls return 0 URLs across 12 hosts
+        in 0.6s — a clear silent-throttle signature).
+
+        We pass the host list via -list so the tool runs ONE batch, instead of
+        looping host-by-host with per-host timeouts (which is how xurlfind3r
+        burns budget on slow hosts).
+        """
+        if not ToolChecker.check_tool('urlfinder'):
+            Logger.warning("urlfinder not found, skipping (install via /settings/tools)")
+            record_tool_log('urlfinder', {
+                'status': 'not_found', 'rc': -1, 'elapsed': 0,
+            })
+            return set()
+
+        Logger.info("Collecting URLs with urlfinder (PD)...")
+        output_file = self.output_mgr.get_path('urls', 'urlfinder.txt')
+        log_file    = self.output_mgr.get_path('logs', 'urlfinder.log')
+        budget_s    = 600  # 10-minute hard cap for the whole batch
+
+        t0 = time.time()
+        try:
+            with open(log_file, 'w') as lf:
+                result = subprocess.run(
+                    ['urlfinder',
+                     '-list',   str(input_file),
+                     '-o',      str(output_file),
+                     '-silent'],
+                    stderr=lf,
+                    stdout=subprocess.DEVNULL,
+                    timeout=budget_s,
+                )
+            elapsed = round(time.time() - t0, 1)
+
+            urls: Set[str] = set()
+            if output_file.exists():
+                with open(output_file, 'r') as f:
+                    for raw in f:
+                        line = raw.strip()
+                        if line:
+                            urls.add(line)
+
+            status = 'ok' if result.returncode == 0 else 'partial'
+            record_tool_log('urlfinder', {
+                'status':  status,
+                'rc':      result.returncode,
+                'elapsed': elapsed,
+                'urls':    len(urls),
+            })
+            Logger.success(f"urlfinder: {len(urls)} URLs in {elapsed}s")
+            return urls
+
+        except subprocess.TimeoutExpired:
+            elapsed = round(time.time() - t0, 1)
+            record_tool_log('urlfinder', {
+                'status': 'timeout', 'rc': -1, 'elapsed': elapsed,
+                'msg': f'budget {budget_s}s exhausted',
+            })
+            Logger.warning(f"urlfinder: budget {budget_s}s reached")
+            return set()
+        except Exception as e:
+            elapsed = round(time.time() - t0, 1)
+            record_tool_log('urlfinder', {
+                'status': 'error', 'rc': -1, 'elapsed': elapsed, 'msg': str(e),
+            })
+            Logger.error(f"urlfinder error: {e}")
+            return set()
+
     def collect_from_archives(self, input_file: Path) -> Set[str]:
         """Collect URLs — ALL crawlers and archive tools run fully in parallel."""
         Logger.header("URL COLLECTION")
@@ -2215,10 +2288,14 @@ class URLCollector:
         all_urls: set[str] = set()
         _lock = threading.Lock()
 
-        # All 5 sources run concurrently — each has its own internal budget/timeout.
-        # gau and waybackurls only hit root domain + www (archive search is domain-level).
+        # All sources run concurrently — each has its own internal budget/timeout.
+        # urlfinder (PD) is the new primary archive collector (unifies wayback+otx
+        # +commoncrawl with proper retry/rate-limit). gau and waybackurls are kept
+        # as fallback while we validate urlfinder's yield over a few real scans;
+        # they will be pruned in a follow-up commit (see TASK #49).
         # xurlfind3r / katana / hakrawler crawl the live host list directly.
         _crawlers = [
+            ('urlfinder',    self.collect_with_urlfinder,     input_file),
             ('gau',          self._collect_with_gau,          input_file),
             ('waybackurls',  self._collect_with_waybackurls,  input_file),
             ('xurlfind3r',   self.collect_with_xurlfind3r,    input_file),
@@ -2227,7 +2304,7 @@ class URLCollector:
         ]
 
         Logger.info(f"Launching {len(_crawlers)} URL sources in parallel "
-                    f"(gau/wayback: archive  |  xurlfind3r/katana/hakrawler: live crawl)…")
+                    f"(urlfinder/gau/wayback: archive  |  xurlfind3r/katana/hakrawler: live crawl)…")
 
         with ThreadPoolExecutor(max_workers=len(_crawlers)) as executor:
             futures = {executor.submit(fn, arg): name for name, fn, arg in _crawlers}
@@ -4877,13 +4954,8 @@ class GivEnum:
         self.diff_manager.diff_results()
         self.report_generator.generate_markdown_report(scan_mode='active' if active else 'passive')
         self.report_generator.generate_json_report(scan_mode='active' if active else 'passive')
-        self._generate_analysis_report()
         elapsed = time.time() - start_time
         self._print_summary(elapsed)
-
-    def _generate_analysis_report(self):
-        """No-op: analyze_results.py has been removed from this project."""
-        pass
 
     def _print_summary(self, elapsed_time: float):
         """Print final summary"""
