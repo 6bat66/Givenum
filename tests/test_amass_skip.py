@@ -77,6 +77,92 @@ def test_amass_skipped_when_only_irrelevant_keys(configured_paths, output_mgr):
     assert not mock_run.called
 
 
+def test_amass_skipped_when_only_github_token_configured(configured_paths, output_mgr):
+    """TASK #56 refinement: github_token alone powers github-subdomains, NOT
+    amass's subdomain-discovery providers. Pre-#56 this falsely allowed amass
+    to run for 10 min and return 0 subdomains."""
+    api_config = APIConfig()
+    api_config.save_key("github_token", "ghp_fake_token_DO_NOT_USE")
+
+    enum = _make_enum(output_mgr, api_config)
+
+    with patch.object(ToolChecker, "check_tool", return_value=True), \
+         patch("GivEnum.subprocess.run") as mock_run:
+        enum.run_amass()
+
+    assert not mock_run.called, (
+        "github_token alone must NOT trigger amass — github-subdomains tool "
+        "covers GitHub-based subdomain discovery separately. amass needs "
+        "Shodan/Censys/VirusTotal/SecurityTrails/CertSpotter/FOFA/Netlas."
+    )
+
+    from GivEnum import _tool_log
+    assert _tool_log["amass"]["status"] == "skipped"
+    assert "subdomain-discovery" in _tool_log["amass"]["msg"]
+
+
+def test_amass_skipped_when_only_hunter_configured(configured_paths, output_mgr):
+    """Hunter.io is for emails, not subdomains — skip amass."""
+    api_config = APIConfig()
+    api_config.save_key("hunter", "fake-hunter-key")
+
+    enum = _make_enum(output_mgr, api_config)
+
+    with patch.object(ToolChecker, "check_tool", return_value=True), \
+         patch("GivEnum.subprocess.run") as mock_run:
+        enum.run_amass()
+
+    assert not mock_run.called
+
+
+@pytest.mark.parametrize("key_name", [
+    "shodan",
+    "virustotal",
+    "securitytrails",
+    "certspotter",
+    "netlas",
+])
+def test_amass_runs_when_a_subdomain_discovery_key_is_set(
+    configured_paths, output_mgr, key_name
+):
+    """Each individual subdomain-discovery key must un-skip amass."""
+    api_config = APIConfig()
+    api_config.save_key(key_name, f"test-{key_name}-key")
+    enum = _make_enum(output_mgr, api_config)
+
+    class FakeProc:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    with patch.object(ToolChecker, "check_tool", return_value=True), \
+         patch("GivEnum.subprocess.run", return_value=FakeProc()) as mock_run:
+        enum.run_amass()
+
+    assert mock_run.called, f"key={key_name!r} should make amass run"
+
+
+def test_amass_runs_when_censys_id_and_secret_both_set(configured_paths, output_mgr):
+    """Censys is the one paired-key case — id alone is enough to trigger;
+    sync_amass_config also requires secret to actually generate the entry,
+    but the run-vs-skip decision is made on id alone (current behaviour)."""
+    api_config = APIConfig()
+    api_config.save_key("censys_id", "id")
+    api_config.save_key("censys_secret", "secret")
+    enum = _make_enum(output_mgr, api_config)
+
+    class FakeProc:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    with patch.object(ToolChecker, "check_tool", return_value=True), \
+         patch("GivEnum.subprocess.run", return_value=FakeProc()) as mock_run:
+        enum.run_amass()
+
+    assert mock_run.called
+
+
 # ── Run path: ≥1 key → amass should be invoked ──────────────────────────────
 
 def test_amass_runs_when_at_least_one_key_configured(configured_paths, output_mgr):

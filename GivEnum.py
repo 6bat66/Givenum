@@ -215,11 +215,34 @@ class Colors:
 
 class APIConfig:
     """API Keys Configuration"""
-    
+
+    # Keys that amass can actually use to find SUBDOMAINS. Configuring any of
+    # these justifies the 10-min amass run; configuring only github_token
+    # (used by the standalone github-subdomains tool) or hunter (emails) does
+    # not — see TASK #56.
+    AMASS_SUBDOMAIN_KEYS = (
+        'shodan',
+        'virustotal',
+        'securitytrails',
+        'certspotter',
+        'censys_id',     # paired with censys_secret in sync_amass_config
+        'fofa_key',      # paired with fofa_email
+        'netlas',
+    )
+
     def __init__(self):
         config_dir = Path(os.environ.get('GIVENUM_CONFIG_DIR', Path.home() / '.config' / 'givenum'))
         self.config_file = config_dir / 'api_keys.json'
         self.keys = self.load_keys()
+
+    def has_amass_subdomain_keys(self) -> bool:
+        """True iff at least one key amass actually uses for subdomain enum is set.
+
+        github_token alone is NOT enough — that key powers the standalone
+        github-subdomains tool, not amass's subdomain-discovery providers.
+        Same for hunter (emails, not subdomains).
+        """
+        return any(self.keys.get(k) for k in self.AMASS_SUBDOMAIN_KEYS)
     
     def load_keys(self) -> Dict[str, str]:
         """Load API keys from config file"""
@@ -1017,8 +1040,28 @@ class SubdomainEnum:
             _tool_log['amass'] = {'status': 'not_found', 'rc': -1, 'elapsed': 0}
             return set()
 
-        # Pre-check: is there at least one API key configured for amass?
-        # sync_amass_config() returns None when zero applicable keys are set.
+        # Pre-check: skip amass unless a key it actually uses for subdomain
+        # discovery is configured (TASK #56 refinement).
+        # github_token alone is NOT enough — it only powers the standalone
+        # github-subdomains tool, which already runs in the parallel pool.
+        # Without Shodan/Censys/VirusTotal/SecurityTrails/CertSpotter/FOFA/
+        # Netlas, amass duplicates subfinder + crt.sh and burns 10 min.
+        if not self.api_config.has_amass_subdomain_keys():
+            Logger.warning(
+                "amass: skipping — no subdomain-discovery API keys configured. "
+                "amass needs Shodan/Censys/VirusTotal/SecurityTrails/CertSpotter/"
+                "FOFA/Netlas to add coverage beyond what subfinder+crt.sh already "
+                "give. Configure via --configure-api or /settings/apis."
+            )
+            _tool_log['amass'] = {
+                'status':  'skipped',
+                'rc':      0,
+                'elapsed': 0,
+                'msg':     'no subdomain-discovery API keys (Shodan/Censys/VT/SecurityTrails/etc)',
+            }
+            return set()
+
+        # We have at least one useful key — sync the amass config file and run.
         try:
             _amass_cfg = self.api_config.sync_amass_config()
         except Exception as e:
@@ -1026,17 +1069,14 @@ class SubdomainEnum:
             _amass_cfg = None
 
         if _amass_cfg is None:
-            Logger.warning(
-                "amass: skipping — no API keys configured (Shodan/Censys/VirusTotal "
-                "etc.). Without keys, amass duplicates subfinder/assetfinder/crt.sh "
-                "and burns ~10 min for no extra coverage. Run --configure-api or use "
-                "the dashboard /settings/apis to enable."
-            )
+            # has_amass_subdomain_keys() said yes but sync produced no config —
+            # likely a bug in sync_amass_config(). Log and skip rather than
+            # invoke amass without -config.
+            Logger.warning("amass: skipping — sync_amass_config() returned None "
+                           "despite has_amass_subdomain_keys()=True (likely a bug)")
             _tool_log['amass'] = {
-                'status':  'skipped',
-                'rc':      0,
-                'elapsed': 0,
-                'msg':     'no datasource API keys configured',
+                'status': 'skipped', 'rc': 0, 'elapsed': 0,
+                'msg': 'sync_amass_config returned None unexpectedly',
             }
             return set()
 
