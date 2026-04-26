@@ -983,9 +983,40 @@ class SubdomainEnum:
           2. Version variance — amass v3 writes to stdout; amass v4 may write
              only to the local DB or to a `-o` file.  We force `-o` so we always
              read results from a file rather than stdout.
+
+        Skip-fast contract (TASK #25):
+          Without API keys (Shodan / Censys / VirusTotal / etc.), amass
+          falls back to the same free sources that subfinder/assetfinder/
+          crt.sh already cover. On the bscash.com.br scan it burned
+          617 seconds for ZERO new subdomains. We now check for at least
+          one configured datasource key and skip the run entirely if none
+          exist, saving ~10 min per scan.
         """
         if not ToolChecker.check_tool('amass'):
             _tool_log['amass'] = {'status': 'not_found', 'rc': -1, 'elapsed': 0}
+            return set()
+
+        # Pre-check: is there at least one API key configured for amass?
+        # sync_amass_config() returns None when zero applicable keys are set.
+        try:
+            _amass_cfg = self.api_config.sync_amass_config()
+        except Exception as e:
+            Logger.warning(f"Could not sync amass config: {e}")
+            _amass_cfg = None
+
+        if _amass_cfg is None:
+            Logger.warning(
+                "amass: skipping — no API keys configured (Shodan/Censys/VirusTotal "
+                "etc.). Without keys, amass duplicates subfinder/assetfinder/crt.sh "
+                "and burns ~10 min for no extra coverage. Run --configure-api or use "
+                "the dashboard /settings/apis to enable."
+            )
+            _tool_log['amass'] = {
+                'status':  'skipped',
+                'rc':      0,
+                'elapsed': 0,
+                'msg':     'no datasource API keys configured',
+            }
             return set()
 
         Logger.info("Running amass (passive, dedicated slot — up to 10 min)...")
@@ -994,15 +1025,8 @@ class SubdomainEnum:
 
         try:
             _proxy_args = _get_proxy_flag()
-            # Inject UI-configured API keys via auto-generated config (keeps
-            # user-owned ~/.config/amass untouched).
-            _amass_config_flag: List[str] = []
-            try:
-                _amass_cfg = self.api_config.sync_amass_config()
-                if _amass_cfg:
-                    _amass_config_flag = ['-config', str(_amass_cfg)]
-            except Exception as e:
-                Logger.warning(f"Could not sync amass config: {e}")
+            # API key config already validated above — pass it to amass.
+            _amass_config_flag: List[str] = ['-config', str(_amass_cfg)]
             result = subprocess.run(
                 [
                     'amass', 'enum', '-passive',
@@ -4944,7 +4968,7 @@ class GivEnum:
         # 18. Generate reports
         self.report_generator.generate_markdown_report(scan_mode='active' if active else 'passive')
         self.report_generator.generate_json_report(scan_mode='active' if active else 'passive')
-        self._generate_analysis_report()
+        # _generate_analysis_report() removed with analyze_results.py (TASK #20).
 
         # Summary
         self._print_summary(time.time() - start_time)
