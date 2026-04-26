@@ -46,3 +46,4 @@ logs/
 *.tar.gz
 archives/
 *.bak
+.mypy_cache/
