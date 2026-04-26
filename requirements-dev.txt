@@ -4,3 +4,10 @@
 
 pytest>=7.4
 pytest-timeout>=2.1   # safety net for runaway threads in concurrency tests
+
+# Static type checker — catches bugs like `self.method()` calls to
+# methods that no longer exist (TASK #50). The mypy config in
+# pyproject.toml is intentionally permissive at the start; tighten
+# over time as untyped defs get type hints.
+mypy>=1.10
+types-requests>=2.31

@@ -15,13 +15,24 @@ from typing import Optional, Set
 
 
 def load_job(job_file: Path) -> Optional[dict]:
+    """Read a job JSON file. Returns None for missing/corrupt files.
+
+    NB: previously used a bare `except Exception: pass` which silently swallowed
+    JSON corruption, OS errors, AND KeyboardInterrupt-derived bugs. Now we
+    classify and log so a corrupt job file shows up in stderr instead of
+    behaving as a missing file (TASK #29).
+    """
     if not job_file.exists():
         return None
     try:
         with open(job_file, 'r') as f:
             data = json.load(f)
         return data if isinstance(data, dict) else None
-    except Exception:
+    except json.JSONDecodeError as e:
+        print(f"[!] scan_runner: corrupt job file {job_file}: {e}", file=sys.stderr)
+        return None
+    except OSError as e:
+        print(f"[!] scan_runner: cannot read job file {job_file}: {e}", file=sys.stderr)
         return None
 
 

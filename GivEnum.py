@@ -685,12 +685,15 @@ class CertificateTransparency:
             # longer wait before giving up.
             response = _api_request(url, timeout=30)
             if response is not None and response.status_code in (404, 502, 503):
+                last_code = response.status_code
                 for wait in (15, 30, 60):
-                    Logger.warning(f"crt.sh HTTP {response.status_code} — retrying in {wait}s")
+                    Logger.warning(f"crt.sh HTTP {last_code} — retrying in {wait}s")
                     time.sleep(wait)
                     response = _api_request(url, timeout=30)
-                    if response is not None and response.status_code == 200:
-                        break
+                    if response is not None:
+                        last_code = response.status_code
+                        if last_code == 200:
+                            break
 
             if response and response.status_code == 200:
                 data = response.json()
@@ -1196,7 +1199,7 @@ class SubdomainEnum:
 
         # AlienVault is rate-limited aggressively — run it after the parallel pool to
         # avoid 429s from concurrent HTTP traffic across all other sources firing at once.
-        enum_tasks: list[tuple[str, any]] = [
+        enum_tasks: list[tuple[str, tuple]] = [
             *[(name, (self.run_tool, name, cmd)) for name, cmd in self.tools.items() if cmd],
             ('crtsh',         (ct.query_crtsh,)),
             ('certspotter',   (ct.query_certspotter, self.api_config.get_key('certspotter'))),
@@ -2944,16 +2947,29 @@ class GitDumper:
         self.output_mgr = output_mgr
     
     def check_and_dump(self, url_file: Path):
-        """Check for exposed .git and dump if found"""
+        """Check for exposed .git and dump if found.
+
+        Failure-mode handling (TASK #54): the previous version logged every
+        request exception as 'Git dump failed', which mixed three very
+        different categories together:
+          1. SSL hostname mismatch (target's cert is broken — not our bug,
+             not actionable). Counted but logged once.
+          2. Connection refused / network unreachable (host doesn't expose
+             HTTP, or our container can't reach it). Counted, no spam.
+          3. Real HTTP responses (200 / 404 / 403 / etc.) — these we want.
+        """
         Logger.header("GIT REPOSITORY CHECK")
         Logger.info("Checking for exposed .git directories...")
-        
-        exposed = []
-        
+
+        exposed: List[str] = []
+        ssl_mismatch = 0
+        network_unreachable = 0
+        other_errors = 0
+
         try:
             with open(url_file, 'r') as f:
                 urls = [line.strip() for line in f if line.strip()]
-            
+
             for url in urls:
                 git_url = f"{url}/.git/config"
                 try:
@@ -2961,14 +2977,37 @@ class GitDumper:
                     if response.status_code == 200 and '[core]' in response.text:
                         exposed.append(url)
                         Logger.warning(f"Exposed .git found: {url}")
-                        
+
                         # Attempt to dump with goop
                         if ToolChecker.check_tool('goop'):
                             self._dump_with_goop(url)
                         elif ToolChecker.check_tool('git-dumper'):
                             self._dump_with_git_dumper(url)
+                except requests.exceptions.SSLError:
+                    # Target cert is broken (hostname mismatch / expired /
+                    # self-signed). Not our bug. Don't retry with verify=False
+                    # because that's an MITM hole.
+                    ssl_mismatch += 1
+                except requests.exceptions.ConnectionError:
+                    # Network unreachable / connection refused / DNS fail.
+                    # Common in the bridge network — IPv4 patch (TASK #22)
+                    # already cuts most of these.
+                    network_unreachable += 1
                 except Exception as e:
-                    Logger.warning(f"Git dump failed for {url}: {e}")
+                    other_errors += 1
+                    if other_errors <= 5:
+                        # Only spam the first 5 unexpected errors so the log
+                        # stays useful.
+                        Logger.warning(f"Git check unexpected error for {url}: {e}")
+
+            # One-line summary of the silent failures (replaces the old per-host
+            # warning storm).
+            if ssl_mismatch or network_unreachable or other_errors:
+                Logger.info(
+                    f"git-check: skipped {ssl_mismatch} (SSL mismatch), "
+                    f"{network_unreachable} (unreachable), "
+                    f"{other_errors} (other) — none actionable"
+                )
             
             if exposed:
                 output_file = self.output_mgr.get_path('git', 'exposed_git.txt')
@@ -3516,9 +3555,20 @@ class APIDiscovery:
     urls/kiterunner_apis.txt for inclusion in the scan report.
     """
 
+    # All known paths kiterunner may use across versions / install methods.
+    # The Dockerfile downloads the .kite directly; `kr wordlist download`
+    # places it under ~/.config/kiterunner or ~/.kiterunner depending on
+    # the kr release. Cover all of them so a config drift doesn't silently
+    # break API discovery.
     _WORDLISTS = [
         '/root/.kiterunner/routes-small.kite',
+        '/root/.kiterunner/wordlists/routes-small.kite',
+        '/root/.config/kiterunner/wordlists/routes-small.kite',
+        '/root/.config/kiterunner/routes-small.kite',
+        '/usr/local/share/kiterunner/routes-small.kite',
         os.path.expanduser('~/.kiterunner/routes-small.kite'),
+        os.path.expanduser('~/.kiterunner/wordlists/routes-small.kite'),
+        os.path.expanduser('~/.config/kiterunner/wordlists/routes-small.kite'),
     ]
 
     def __init__(self, output_mgr: OutputManager):

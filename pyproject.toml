@@ -1,0 +1,22 @@
+[tool.mypy]
+# Start permissive — GivEnum.py is 5k+ lines of untyped Python today.
+# The point of enabling mypy is to catch a SPECIFIC class of bug:
+# attribute access / method calls on names that don't exist.
+# That's `check_untyped_defs = true`, which scans inside functions even
+# without parameter type hints.
+#
+# We DON'T set disallow_untyped_defs yet — that would force every
+# function to grow type hints and produce hundreds of errors. Tighten
+# incrementally over time.
+python_version = "3.11"
+files = ["GivEnum.py", "scan_runner.py", "tests"]
+check_untyped_defs = true
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+
+# Per-module overrides go here as the codebase grows. Example:
+# [[tool.mypy.overrides]]
+# module = "GivEnum"
+# disallow_untyped_defs = true   # once GivEnum.py is fully typed

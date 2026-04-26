@@ -1,4 +1,4 @@
-# WebEnum - Quick Reference
+# GivEnum - Quick Reference
 
 ## 🚀 Installation
 
@@ -189,7 +189,7 @@ cat results/corp.com_*/ports/open_ports.txt
 
 ```bash
 # Daily cron job
-0 2 * * * cd /opt/webenum && python3 GivEnum.py -d target.com --skip-screenshots
+0 2 * * * cd /opt/givenum && python3 GivEnum.py -d target.com --skip-screenshots
 
 # Check changes
 cat results/target.com_*/diff/*.diff
@@ -317,7 +317,7 @@ python3 GivEnum.py -d target.com \
 crontab -e
 
 # Daily 2 AM scan
-0 2 * * * cd /opt/webenum && python3 GivEnum.py -d target.com --skip-screenshots >> /var/log/webenum.log 2>&1
+0 2 * * * cd /opt/givenum && python3 GivEnum.py -d target.com --skip-screenshots >> /var/log/givenum.log 2>&1
 ```
 
 ### Diff Tracking

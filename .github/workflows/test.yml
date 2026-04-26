@@ -30,6 +30,18 @@ jobs:
       - name: Run pytest
         run: pytest -v
 
+      # mypy baseline (TASK #50). Currently runs with continue-on-error
+      # because GivEnum.py has ~16 baseline issues (mostly Path|None mass
+      # refactor needed). The job stays visible so REGRESSIONS surface,
+      # but doesn't block merges yet. Once the baseline is clean, flip
+      # continue-on-error to false to make new errors a hard fail.
+      - name: Run mypy
+        continue-on-error: true
+        run: |
+          mypy GivEnum.py scan_runner.py tests \
+            --no-incremental \
+            --cache-dir=/tmp/mypy-cache
+
   web:
     name: vitest (node ${{ matrix.node }})
     runs-on: ubuntu-latest

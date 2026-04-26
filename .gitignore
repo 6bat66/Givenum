@@ -6,7 +6,11 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+
+# Env files (any variant — .env, .env.local, .env.production, .env.bak, etc.)
 .env
+.env.*
+!.env.example
 
 # Scan results (can be large)
 results/

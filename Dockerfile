@@ -123,10 +123,22 @@ RUN git clone --depth=1 -q https://github.com/ticarpi/jwt_tool /opt/jwt_tool && 
     || echo "[!] jwt_tool install failed (non-critical)"
 
 RUN python3 -m pip install --break-system-packages -q s3scanner 2>/dev/null || echo "[!] s3scanner failed (non-critical)"
-# kiterunner routes wordlist
-RUN mkdir -p /root/.kiterunner && \
+# kiterunner routes wordlist (TASK #51)
+# kr looks in ~/.kiterunner, ~/.kiterunner/wordlists, ~/.config/kiterunner/...
+# depending on release. We download once and symlink to all known locations
+# so a kr version bump doesn't silently break API discovery.
+# Drop the 2>/dev/null so a real download failure is visible at build time —
+# the verification stage at the end of the Dockerfile catches it anyway.
+RUN mkdir -p /root/.kiterunner /root/.kiterunner/wordlists \
+             /root/.config/kiterunner/wordlists && \
     curl -fsSL "https://wordlists-cdn.assetnote.io/data/kiterunner/routes-small.kite" \
-      -o /root/.kiterunner/routes-small.kite 2>/dev/null || echo "[!] kiterunner wordlist download failed (non-critical)"
+      -o /root/.kiterunner/routes-small.kite && \
+    test -s /root/.kiterunner/routes-small.kite && \
+    ln -sf /root/.kiterunner/routes-small.kite \
+           /root/.kiterunner/wordlists/routes-small.kite && \
+    ln -sf /root/.kiterunner/routes-small.kite \
+           /root/.config/kiterunner/wordlists/routes-small.kite \
+    || echo "[!] kiterunner wordlist download failed (non-critical) — API discovery will be skipped"
 RUN go install github.com/owasp-amass/amass/v4/...@latest 2>/dev/null || echo "[!] amass install failed (non-critical)"
 RUN go install github.com/gwen001/github-subdomains@latest 2>/dev/null || echo "[!] github-subdomains failed (non-critical)"
 RUN go install github.com/projectdiscovery/uncover/cmd/uncover@latest 2>/dev/null || echo "[!] uncover failed (non-critical)"
