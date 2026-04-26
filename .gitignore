@@ -47,3 +47,4 @@ logs/
 archives/
 *.bak
 .mypy_cache/
+.mypy_cache/
